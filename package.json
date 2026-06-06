@@ -1,0 +1,11 @@
+{
+  "name": "pi-session-web-ui",
+  "version": "0.1.0",
+  "description": "Pi extension that starts a web server to view and interact with the current conversation in a browser via /web",
+  "keywords": ["pi-package"],
+  "license": "MIT",
+  "type": "module",
+  "pi": {
+    "extensions": ["./extensions/session-web-ui/index.ts"]
+  }
+}
