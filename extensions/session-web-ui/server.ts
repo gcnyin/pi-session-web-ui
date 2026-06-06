@@ -33,6 +33,8 @@ interface ServerOptions {
   onModels: () => Promise<{ provider: string; id: string; name: string }[]>;
   onModelSwitch: (provider: string, modelId: string) => Promise<{ ok: boolean; error?: string }>;
   onSessions: () => Promise<SessionInfo[]>;
+  onSessionDetail: (id: string) => Promise<{ history: Record<string, unknown>[]; cwd: string; model?: { provider: string; name: string } } | null>;
+  onSwitchSession: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
   cwd: string;
   getStatus: () => Status;
   history?: Record<string, unknown>[];
@@ -60,14 +62,7 @@ export class WebServer {
 
   constructor(options: ServerOptions) {
     this.options = options;
-
-    // Load HTML template
-    const htmlPath = resolve(__dirname, "index.html");
-    if (existsSync(htmlPath)) {
-      this.htmlContent = readFileSync(htmlPath, "utf-8");
-    } else {
-      this.htmlContent = "<h1>index.html not found</h1>";
-    }
+    this.htmlContent = this.loadHtml();
 
     this.server = createServer((req, res) => {
       try {
@@ -80,6 +75,24 @@ export class WebServer {
         }
       }
     });
+  }
+
+  private loadHtml(): string {
+    const htmlPath = resolve(__dirname, "index.html");
+    if (existsSync(htmlPath)) {
+      return readFileSync(htmlPath, "utf-8");
+    }
+    return "<h1>index.html not found</h1>";
+  }
+
+  /** Reload HTML from disk (useful after /reload) */
+  reloadHtml(): void {
+    this.htmlContent = this.loadHtml();
+  }
+
+  /** Update session-bound options without restarting the server */
+  updateOptions(partial: Partial<ServerOptions>): void {
+    Object.assign(this.options, partial);
   }
 
   private handleRequest(req: IncomingMessage, res: ServerResponse) {
@@ -128,6 +141,9 @@ export class WebServer {
         break;
       case "/sessions":
         this.handleSessions(req, res);
+        break;
+      case "/session/switch":
+        this.handleSwitchSession(req, res);
         break;
       default:
         res.writeHead(404);
@@ -185,13 +201,16 @@ export class WebServer {
     }
   }
 
-  private handleSse(_req: IncomingMessage, res: ServerResponse) {
+  private async handleSse(_req: IncomingMessage, res: ServerResponse) {
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
       "X-Accel-Buffering": "no",
     });
+
+    const url = new URL(_req.url ?? "/", `http://${_req.headers.host ?? "localhost"}`);
+    const sessionId = url.searchParams.get("id");
 
     const client: SseClient = {
       id: ++this.clientIdCounter,
@@ -200,9 +219,21 @@ export class WebServer {
 
     this.clients.add(client);
 
-    // Send initial connected event with full status (including history)
-    const statusData = this.options.getStatus();
-    statusData.history = this.options.history;
+    // Load history: if ?id= is present, fetch that session's detail
+    let statusData = this.options.getStatus();
+    if (sessionId) {
+      try {
+        const detail = await this.options.onSessionDetail(sessionId);
+        if (detail) {
+          statusData = { ...statusData, cwd: detail.cwd, model: detail.model };
+          statusData.history = detail.history;
+          statusData.sessionId = sessionId;
+        }
+      } catch { /* fall back to current session */ }
+    }
+    if (!statusData.history) {
+      statusData.history = this.options.history;
+    }
     this.sendEvent(client, "connected", JSON.stringify(statusData));
 
     // Flush any queued events
@@ -357,9 +388,36 @@ export class WebServer {
     }
   }
 
-  async start(port = 0): Promise<number> {
+  private async handleSwitchSession(req: IncomingMessage, res: ServerResponse) {
+    if (req.method !== "POST") {
+      res.writeHead(405);
+      res.end("Method Not Allowed");
+      return;
+    }
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", async () => {
+      try {
+        const { id } = JSON.parse(body);
+        if (!id) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: "Session id required" }));
+          return;
+        }
+        const result = await this.options.onSwitchSession(id);
+        res.writeHead(result.ok ? 200 : 400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: "Invalid JSON" }));
+      }
+    });
+  }
+
+  async start(port?: number): Promise<number> {
+    const p = port ?? parseInt(process.env.PI_WEB_PORT || "9876", 10);
     return new Promise((resolve, reject) => {
-      this.server.listen(port, "127.0.0.1", () => {
+      this.server.listen(p, "127.0.0.1", () => {
         const addr = this.server.address();
         if (addr && typeof addr === "object") {
           this._port = addr.port;

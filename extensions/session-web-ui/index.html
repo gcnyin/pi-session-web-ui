@@ -2065,11 +2065,29 @@ function setBanner(status, text) {
 // ═══════════════════════════════════════════════════════════════════
 // SSE
 // ═══════════════════════════════════════════════════════════════════
+function getUrlSessionId() {
+  const p = new URLSearchParams(location.search);
+  return p.get('id') || null;
+}
+
+function navigateToSession(sessionId) {
+  const url = new URL(location.href);
+  url.searchParams.set('id', sessionId);
+  history.pushState({}, '', url);
+  // Clear messages and reconnect with new session
+  D.msgList.innerHTML = '';
+  D.empty.classList.remove('hidden');
+  if (state.eventSource) { state.eventSource.close(); state.eventSource = null; }
+  connect();
+}
+
 function connect() {
   if (state.eventSource) state.eventSource.close();
   setBanner('reconnecting', 'connecting...');
 
-  const es = new EventSource('/events');
+  const sid = getUrlSessionId();
+  const esUrl = sid ? '/events?id=' + encodeURIComponent(sid) : '/events';
+  const es = new EventSource(esUrl);
   state.eventSource = es;
   let rt = null;
 
@@ -2079,13 +2097,28 @@ function connect() {
     try { const d = JSON.parse(e.data);
       if (d.model) state.model = d.model;
       if (d.cwd) { state.cwd = d.cwd; state.activeCwd = d.cwd; }
+      if (d.sessionId) {
+        state.sessionId = d.sessionId;
+        // Sync URL if viewing a different session
+        const urlId = getUrlSessionId();
+        if (urlId !== d.sessionId) {
+          const url = new URL(location.href);
+          url.searchParams.set('id', d.sessionId);
+          history.replaceState({}, '', url);
+        }
+      }
       if (d.streaming!==undefined) state.streaming = d.streaming;
       if (d.thinking!==undefined) state.thinking = d.thinking;
       if (d.agentActive!==undefined) state.agentActive = d.agentActive;
       // Render past conversation history if present
       if (Array.isArray(d.history) && d.history.length > 0) {
+        D.msgList.innerHTML = '';
+        D.empty.classList.add('hidden');
         renderHistory(d.history);
         hideEmpty();
+      } else if (!d.history || d.history.length === 0) {
+        // No history — show empty state (unless already has messages)
+        if (D.msgList.children.length === 0) D.empty.classList.remove('hidden');
       }
       refresh();
     } catch {}
@@ -2989,11 +3022,29 @@ function renderSessionList() {
     });
   });
 
-  // Bind session item clicks
+  // Bind session item clicks — switch pi to that session
   S.body.querySelectorAll('.sidebar-item').forEach(item => {
-    item.addEventListener('click', () => {
+    item.addEventListener('click', async () => {
+      const sid = item.dataset.sessionId;
+      if (!sid) return;
       S.body.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active'));
       item.classList.add('active');
+      // If already viewing this session, no-op
+      if (sid === state.sessionId) return;
+      // Switch pi's active session to this one
+      try {
+        const r = await fetch('/session/switch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: sid }),
+        });
+        if (r.ok) {
+          // Switch succeeded — SSE will reconnect automatically,
+          // URL will be updated in the connected event handler.
+        }
+      } catch (e) {
+        console.error('Switch session failed:', e);
+      }
     });
   });
 }
