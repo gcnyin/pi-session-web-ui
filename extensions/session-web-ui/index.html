@@ -1571,6 +1571,12 @@ body {
         <span class="model-name" id="modelName">no model</span>
         <svg class="model-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>
       </div>
+      <div class="header-cwd" id="headerCwd" title="Current directory">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2 4a2 2 0 0 1 2-2h3.17a2 2 0 0 1 1.41.59l1.42 1.41a2 2 0 0 0 1.41.59H13a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4z"/>
+        </svg>
+        <span>—</span>
+      </div>
     </div>
     <div class="header-right">
       <span class="connection-chip disconnected" id="connectionDot" title="Disconnected">
@@ -1635,6 +1641,7 @@ const $ = id => document.getElementById(id);
 const D = {
   dot: $('connectionDot'),
   modelBadge: $('modelBadge'), modelProv: $('modelProvider'), modelName: $('modelName'),
+  cwd: $('headerCwd'),
   thinkInd: $('thinkingIndicator'),
   themeBtn: $('themeToggle'), themeIcon: $('themeIcon'),
   msgCtr: $('messagesContainer'), msgList: $('messagesList'), empty: $('emptyState'),
@@ -1841,6 +1848,13 @@ function refresh() {
     D.modelBadge.classList.remove('hidden');
   } else {
     D.modelBadge.classList.add('hidden');
+  }
+  if (state.cwd) {
+    const span = D.cwd.querySelector('span');
+    if (span) span.textContent = state.cwd;
+    D.cwd.classList.remove('hidden');
+  } else {
+    D.cwd.classList.add('hidden');
   }
   D.thinkInd.classList.toggle('hidden', !(state.thinking && state.connected));
   // Toggle send button between send and stop mode
