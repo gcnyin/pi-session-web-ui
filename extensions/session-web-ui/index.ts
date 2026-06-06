@@ -227,6 +227,17 @@ export default function (pi: ExtensionAPI) {
 
     const history = loadSessionHistory(sessionFile || "");
     await ensureServer(ctx.cwd, history, event.reason);
+    // Push new session data to all browser clients (handles session switch)
+    broadcast("connected", {
+      connected: true,
+      streaming: isStreaming,
+      thinking: isThinking,
+      agentActive,
+      model: currentModel,
+      cwd: currentCwd,
+      sessionId,
+      history,
+    });
   });
 
   pi.on("session_shutdown", async (_event) => {
