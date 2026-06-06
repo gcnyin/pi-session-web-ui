@@ -128,6 +128,7 @@ export default function (pi: ExtensionAPI) {
           return { ok: false, error: e?.message ?? "Switch failed" };
         }
       },
+      onCurrentHistory: () => loadSessionHistory(sessionFile || ""),
       cwd,
       history,
       getStatus: () => ({

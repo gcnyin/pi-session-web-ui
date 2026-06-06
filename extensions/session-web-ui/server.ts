@@ -34,6 +34,7 @@ interface ServerOptions {
   onModelSwitch: (provider: string, modelId: string) => Promise<{ ok: boolean; error?: string }>;
   onSessions: () => Promise<SessionInfo[]>;
   onSessionDetail: (id: string) => Promise<{ history: Record<string, unknown>[]; cwd: string; model?: { provider: string; name: string } } | null>;
+  onCurrentHistory: () => Record<string, unknown>[];
   onSwitchSession: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
   cwd: string;
   getStatus: () => Status;
@@ -231,8 +232,9 @@ export class WebServer {
         }
       } catch { /* fall back to current session */ }
     }
+    // Always use fresh history (not cached snapshot)
     if (!statusData.history) {
-      statusData.history = this.options.history;
+      statusData.history = this.options.onCurrentHistory();
     }
     this.sendEvent(client, "connected", JSON.stringify(statusData));
 
