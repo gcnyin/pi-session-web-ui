@@ -2367,7 +2367,7 @@ function renderHistory(history) {
               <div class="tool-card-info">
                 <div class="tool-icon ${meta.cls}">${meta.icon}</div>
                 <div><div class="tool-label">${meta.label}</div>
-                <div class="tool-subtitle">${esc(toolSub(block.name, block.arguments))}</div></div>
+                <div class="tool-subtitle">${esc(toolSub(block.name, block.input || block.arguments))}</div></div>
               </div>
               <div class="tool-status"><div class="spinner"></div><span>waiting</span></div>
               <svg class="chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4l4 4-4 4"/></svg>
@@ -2376,7 +2376,7 @@ function renderHistory(history) {
               <button class="tool-copy-btn" onclick="copyToolOutput(this)" title="Copy output">📋 Copy</button>
               <pre></pre>
             </div>`;
-          card.dataset.cmdLine = buildCmdLine(block.name, block.arguments);
+          card.dataset.cmdLine = buildCmdLine(block.name, block.input || block.arguments);
           card.querySelector('pre').textContent = card.dataset.cmdLine;
           card.querySelector('.tool-card-header').addEventListener('click', () => {
             card.querySelector('.tool-card-body').classList.toggle('open');

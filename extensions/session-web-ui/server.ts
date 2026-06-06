@@ -16,11 +16,23 @@ interface Status {
   history?: Record<string, unknown>[];
 }
 
+export interface SessionInfo {
+  path: string;
+  id: string;
+  cwd: string;
+  name?: string;
+  created: string;
+  modified: string;
+  messageCount: number;
+  firstMessage: string;
+}
+
 interface ServerOptions {
   onMessage: (text: string) => void;
   onInterrupt: () => void;
   onModels: () => Promise<{ provider: string; id: string; name: string }[]>;
   onModelSwitch: (provider: string, modelId: string) => Promise<{ ok: boolean; error?: string }>;
+  onSessions: () => Promise<SessionInfo[]>;
   cwd: string;
   getStatus: () => Status;
   history?: Record<string, unknown>[];
@@ -113,6 +125,9 @@ export class WebServer {
         break;
       case "/model":
         this.handleModel(req, res);
+        break;
+      case "/sessions":
+        this.handleSessions(req, res);
         break;
       default:
         res.writeHead(404);
@@ -324,6 +339,22 @@ export class WebServer {
         res.end(JSON.stringify({ error: "Invalid JSON" }));
       }
     });
+  }
+
+  private async handleSessions(_req: IncomingMessage, res: ServerResponse) {
+    if (_req.method !== "GET") {
+      res.writeHead(405);
+      res.end("Method Not Allowed");
+      return;
+    }
+    try {
+      const sessions = await this.options.onSessions();
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ sessions }));
+    } catch (e: any) {
+      res.writeHead(500);
+      res.end(JSON.stringify({ error: e?.message ?? "Failed to list sessions" }));
+    }
   }
 
   async start(port = 0): Promise<number> {

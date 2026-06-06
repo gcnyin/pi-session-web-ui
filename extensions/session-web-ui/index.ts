@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { readFileSync, existsSync } from "node:fs";
+import { SessionManager, buildSessionContext } from "@earendil-works/pi-coding-agent";
+import { existsSync } from "node:fs";
 import { WebServer } from "./server";
 
 let server: WebServer | undefined;
@@ -46,54 +47,18 @@ export default function (pi: ExtensionAPI) {
         };
       }
 
-      // Load conversation history from the session file
+      // Load conversation history using pi SDK's proper session context API.
+      // getBranch() + buildSessionContext() returns the correctly compacted,
+      // current-branch-only message list (the same messages the LLM sees).
       const sessionFile = ctx.sessionManager.getSessionFile();
       let history: Record<string, unknown>[] = [];
       if (sessionFile && existsSync(sessionFile)) {
         try {
-          const raw = readFileSync(sessionFile, "utf-8");
-          history = raw
-            .split("\n")
-            .filter((l) => l.trim())
-            .map((l) => {
-              try {
-                const entry = JSON.parse(l);
-                // Only include message entries with a valid role
-                if (entry.type === "message" && entry.message?.role) {
-                  return {
-                    role: entry.message.role,
-                    content: entry.message.content,
-                    id: entry.id,
-                    timestamp: entry.message.timestamp,
-                    time: entry.timestamp,
-                    // Include toolCallId for toolResult messages
-                    toolCallId: entry.message.toolCallId,
-                    toolName: entry.message.toolName,
-                    isError: entry.message.isError,
-                    // Include model info for assistant messages
-                    model: entry.message.model,
-                    provider: entry.message.provider,
-                    api: entry.message.api,
-                    usage: entry.message.usage,
-                    stopReason: entry.message.stopReason,
-                    // Include text content for backward compatibility
-                    get text() {
-                      if (Array.isArray(this.content)) {
-                        return this.content
-                          .filter((c: any) => c.type === "text")
-                          .map((c: any) => c.text)
-                          .join("\n");
-                      }
-                      return typeof this.content === "string" ? this.content : "";
-                    },
-                  };
-                }
-                return null;
-              } catch {
-                return null;
-              }
-            })
-            .filter((e): e is Record<string, unknown> => e !== null);
+          const sm = SessionManager.open(sessionFile);
+          const entries = sm.getBranch();
+          const leafId = sm.getLeafId();
+          const resolved = buildSessionContext(entries, leafId);
+          history = resolved.messages as unknown as Record<string, unknown>[];
         } catch (e) {
           console.error("Failed to read session history:", e);
         }
@@ -143,6 +108,24 @@ export default function (pi: ExtensionAPI) {
             return { ok: true };
           } catch (e: any) {
             return { ok: false, error: e?.message ?? "Failed to switch model" };
+          }
+        },
+        onSessions: async () => {
+          try {
+            const sessions = await SessionManager.listAll();
+            return sessions.map((s) => ({
+              path: s.path,
+              id: s.id,
+              cwd: s.cwd || "",
+              name: s.name,
+              created: s.created.toISOString(),
+              modified: s.modified.toISOString(),
+              messageCount: s.messageCount,
+              firstMessage: s.firstMessage || "",
+            }));
+          } catch (e) {
+            console.error("Failed to list sessions:", e);
+            return [];
           }
         },
         cwd: ctx.cwd,
