@@ -314,6 +314,11 @@ body {
   border-bottom: 1px solid var(--border-base);
   position: relative;
   z-index: 10;
+  /* Full-width: break out of #app's max-width, content stays aligned */
+  width: 100vw;
+  margin-left: calc(-50vw + 50%);
+  padding-left: calc(50vw - 50% + var(--sp-6));
+  padding-right: calc(50vw - 50% + var(--sp-6));
 }
 
 .header-left {
@@ -1429,6 +1434,8 @@ body {
 
   .header {
     padding: var(--sp-3) 0;
+    padding-left: calc(50vw - 50% + var(--sp-4));
+    padding-right: calc(50vw - 50% + var(--sp-4));
     gap: var(--sp-2);
   }
 
@@ -1514,6 +1521,8 @@ body {
 
   .header {
     padding: var(--sp-2) 0;
+    padding-left: calc(50vw - 50% + var(--sp-3));
+    padding-right: calc(50vw - 50% + var(--sp-3));
   }
 
   .header-left {
@@ -1556,15 +1565,334 @@ body {
     padding: 2px 10px;
   }
 }
+
+/* ══════════════════════════════════════════════════════════════
+   Sidebar — Session History
+   ══════════════════════════════════════════════════════════════ */
+.sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 0;
+  z-index: 50;
+  background: var(--bg-elevated);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: width var(--duration-normal) var(--ease-out);
+}
+
+.sidebar.open {
+  width: 280px;
+  border-right: 1px solid var(--border-base);
+  box-shadow: var(--shadow-lg);
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-3) var(--sp-3);
+  border-bottom: 1px solid var(--border-base);
+  flex-shrink: 0;
+  min-height: 49px;
+}
+
+.header-sidebar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-base);
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all var(--duration-fast) var(--ease-out);
+  font-size: 0.8rem;
+  line-height: 1;
+  margin-right: var(--sp-1);
+}
+
+.header-sidebar-btn:hover {
+  background: var(--bg-surface-hover);
+  border-color: var(--border-strong);
+  color: var(--text-base);
+}
+
+.header-sidebar-btn.active {
+  background: var(--bg-accent-soft);
+  border-color: var(--border-accent);
+  color: var(--text-accent);
+}
+
+.sidebar-title {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.sidebar-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all var(--duration-fast) var(--ease-out);
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.sidebar-close:hover {
+  background: var(--bg-surface-hover);
+  color: var(--text-base);
+}
+
+.sidebar-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* ── Group header ── */
+.sidebar-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px var(--sp-3);
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-base);
+  user-select: none;
+  transition: background var(--duration-fast);
+}
+
+.sidebar-group-header:hover {
+  background: var(--bg-surface-hover);
+}
+
+.sidebar-group-header.active {
+  color: var(--text-accent);
+  background: var(--bg-accent-soft);
+}
+
+.sidebar-group-chevron {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  opacity: 0.5;
+  transition: transform 0.2s var(--ease-out);
+}
+
+.sidebar-group-chevron.open {
+  transform: rotate(90deg);
+}
+
+.sidebar-group-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.sidebar-group-count {
+  flex-shrink: 0;
+  font-size: 0.6rem;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: var(--radius-full);
+  background: var(--bg-surface);
+  color: var(--text-faint);
+}
+
+/* ── Group items container ── */
+.sidebar-group-items {
+  overflow: hidden;
+  transition: max-height 0.3s var(--ease-out);
+}
+
+.sidebar-group-items.collapsed {
+  max-height: 0 !important;
+}
+
+/* ── Session item (inside group) ── */
+.sidebar-item {
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-5);
+  cursor: pointer;
+  transition: background var(--duration-fast);
+  border-left: 2px solid transparent;
+}
+
+.sidebar-item:hover {
+  background: var(--bg-surface-hover);
+}
+
+.sidebar-item.active {
+  background: var(--bg-accent-soft);
+  border-left-color: var(--text-accent);
+}
+
+.sidebar-item-cwd {
+  font-size: 0.62rem;
+  font-family: var(--font-mono);
+  color: var(--text-accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.3;
+}
+
+.sidebar-item-title {
+  font-size: 0.75rem;
+  color: var(--text-base);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.4;
+  margin-top: 1px;
+}
+
+.sidebar-item-meta {
+  font-size: 0.6rem;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  margin-top: 2px;
+  display: flex;
+  gap: var(--sp-2);
+}
+
+/* ── Loading / empty states ── */
+.sidebar-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-8) var(--sp-2);
+  gap: var(--sp-2);
+  font-size: 0.72rem;
+  color: var(--text-faint);
+}
+
+.sidebar-empty {
+  padding: var(--sp-8) var(--sp-3);
+  text-align: center;
+  font-size: 0.72rem;
+  color: var(--text-faint);
+}
+
+.sidebar-error {
+  padding: var(--sp-6) var(--sp-3);
+  text-align: center;
+  font-size: 0.72rem;
+  color: var(--text-danger);
+}
+
+/* ── Backdrop (mobile only) ── */
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 49;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+/* Responsive — Tablet */
+@media (max-width: 768px) {
+  .sidebar.open {
+    width: 280px;
+  }
+
+  .sidebar.open + .sidebar-backdrop {
+    display: block;
+  }
+
+  .sidebar-header {
+    min-height: 44px;
+  }
+
+  .header-sidebar-btn {
+    width: 26px;
+    height: 26px;
+  }
+}
+
+/* Responsive — Phone */
+@media (max-width: 480px) {
+  .sidebar.open {
+    width: 85vw;
+    max-width: 300px;
+  }
+
+  .sidebar-header {
+    min-height: 40px;
+  }
+
+  .header-sidebar-btn {
+    width: 24px;
+    height: 24px;
+  }
+
+  .sidebar-item {
+    padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-4);
+  }
+
+  .sidebar-item-cwd {
+    font-size: 0.58rem;
+  }
+
+  .sidebar-item-title {
+    font-size: 0.72rem;
+  }
+
+  .sidebar-item-meta {
+    font-size: 0.56rem;
+  }
+}
 </style>
 <script src="marked.js"></script>
 </head>
 <body>
+<!-- Sidebar -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-header">
+    <span class="sidebar-title">Sessions</span>
+    <button class="sidebar-close" id="sidebarClose" aria-label="Close sidebar">&#10005;</button>
+  </div>
+  <div class="sidebar-body" id="sidebarBody">
+    <div class="sidebar-loading">
+      <div class="spinner"></div>
+    </div>
+  </div>
+</aside>
+<div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
 <div id="app">
   <!-- Header -->
   <header class="header">
     <div class="header-left">
-      <span class="header-logo" id="logoLink" aria-label="pi">π</span>
+      <button class="header-sidebar-btn" id="sidebarToggle" aria-label="Toggle sessions" title="Sessions (Ctrl+B)">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2 4h12M2 8h12M2 12h12"/>
+        </svg>
+      </button>
       <div class="model-badge" id="modelBadge" title="Click to switch model">
         <span class="model-provider" id="modelProvider">—</span>
         <span class="model-sep">/</span>
@@ -1750,7 +2078,7 @@ function connect() {
     setBanner('connected', 'connected');
     try { const d = JSON.parse(e.data);
       if (d.model) state.model = d.model;
-      if (d.cwd) state.cwd = d.cwd;
+      if (d.cwd) { state.cwd = d.cwd; state.activeCwd = d.cwd; }
       if (d.streaming!==undefined) state.streaming = d.streaming;
       if (d.thinking!==undefined) state.thinking = d.thinking;
       if (d.agentActive!==undefined) state.agentActive = d.agentActive;
@@ -2512,6 +2840,163 @@ window.copyToolOutput = function(btn) {
     setTimeout(() => { btn.classList.remove('copied'); btn.textContent = '📋 Copy'; }, 2000);
   }).catch(() => {});
 };
+
+// ═══════════════════════════════════════════════════════════════════
+// Sidebar — Session History (cwd-grouped)
+// ═══════════════════════════════════════════════════════════════════
+const S = {
+  sidebar: $('sidebar'),
+  toggle: $('sidebarToggle'),
+  close: $('sidebarClose'),
+  body: $('sidebarBody'),
+  backdrop: $('sidebarBackdrop'),
+};
+
+state.sidebarOpen = false;
+state.sessions = [];
+state.sessionsLoading = false;
+state.activeCwd = null;
+state.collapsedGroups = {};
+
+// Load persisted group collapse state
+try {
+  const saved = localStorage.getItem('pi-sidebar-groups');
+  if (saved) state.collapsedGroups = JSON.parse(saved);
+} catch {}
+
+function persistCollapsedGroups() {
+  try { localStorage.setItem('pi-sidebar-groups', JSON.stringify(state.collapsedGroups)); } catch {}
+}
+
+function closeSidebar() {
+  state.sidebarOpen = false;
+  S.sidebar.classList.remove('open');
+  S.toggle.classList.remove('active');
+}
+
+function toggleSidebar() {
+  state.sidebarOpen = !state.sidebarOpen;
+  S.sidebar.classList.toggle('open', state.sidebarOpen);
+  S.toggle.classList.toggle('active', state.sidebarOpen);
+  if (state.sidebarOpen && state.sessions.length === 0 && !state.sessionsLoading) {
+    loadSessions();
+  }
+}
+
+S.toggle.addEventListener('click', toggleSidebar);
+S.close.addEventListener('click', closeSidebar);
+S.backdrop.addEventListener('click', closeSidebar);
+
+// Keyboard shortcut: Ctrl/Cmd+B toggles sidebar (ignored when typing)
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
+    const tag = document.activeElement?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    e.preventDefault();
+    toggleSidebar();
+  }
+});
+
+async function loadSessions() {
+  state.sessionsLoading = true;
+  S.body.innerHTML = '<div class="sidebar-loading"><div class="spinner"></div><span>Loading…</span></div>';
+  try {
+    const r = await fetch('/sessions');
+    if (!r.ok) throw new Error('Failed');
+    const data = await r.json();
+    state.sessions = data.sessions || [];
+    renderSessionList();
+  } catch (e) {
+    S.body.innerHTML = '<div class="sidebar-error">Failed to load sessions</div>';
+    console.error('loadSessions:', e);
+  } finally {
+    state.sessionsLoading = false;
+  }
+}
+
+function shortCwd(cwd) {
+  if (!cwd) return '(unknown)';
+  const parts = cwd.replace(/\/+$/, '').split('/');
+  return parts[parts.length - 1] || cwd;
+}
+
+function renderSessionList() {
+  const sessions = state.sessions;
+  if (sessions.length === 0) {
+    S.body.innerHTML = '<div class="sidebar-empty">No sessions found</div>';
+    return;
+  }
+
+  // 1. Group by cwd
+  const groups = new Map();
+  for (const s of sessions) {
+    const key = s.cwd || '';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(s);
+  }
+
+  // 2. Sort within each group by modified descending
+  for (const items of groups.values()) {
+    items.sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime());
+  }
+
+  // 3. Sort groups: activeCwd first, then by most recent modified
+  const sorted = [...groups.entries()].sort((a, b) => {
+    if (a[0] === state.activeCwd) return -1;
+    if (b[0] === state.activeCwd) return 1;
+    return new Date(b[1][0].modified).getTime() - new Date(a[1][0].modified).getTime();
+  });
+
+  const curId = state.sessionId || '';
+
+  let html = '';
+  for (const [cwd, items] of sorted) {
+    const isActiveCwd = cwd === state.activeCwd;
+    const collapsed = state.collapsedGroups[cwd] ?? (cwd !== state.activeCwd);
+    html += '<div class="sidebar-group">';
+    html += '<div class="sidebar-group-header' + (isActiveCwd ? ' active' : '') + '" data-cwd="' + esc(cwd) + '">';
+    html += '<svg class="sidebar-group-chevron' + (collapsed ? '' : ' open') + '" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4l4 4-4 4"/></svg>';
+    html += '<span class="sidebar-group-name">' + esc(shortCwd(cwd)) + '</span>';
+    html += '<span class="sidebar-group-count">' + items.length + '</span>';
+    html += '</div>';
+    html += '<div class="sidebar-group-items' + (collapsed ? ' collapsed' : '') + '">';
+    for (const s of items) {
+      const title = s.name || s.firstMessage || '(no messages)';
+      const date = new Date(s.modified);
+      const dateStr = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      const timeStr = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+      const shortTitle = title.length > 50 ? title.slice(0, 49) + '\u2026' : title;
+      html += '<div class="sidebar-item' + (s.id === curId ? ' active' : '') + '" data-session-id="' + esc(s.id) + '" data-session-path="' + esc(s.path) + '" title="' + esc(cwd) + ' \u2014 ' + esc(title) + '">';
+      html += '<div class="sidebar-item-title">' + esc(shortTitle) + '</div>';
+      html += '<div class="sidebar-item-meta"><span>' + dateStr + ' ' + timeStr + '</span><span>' + (s.messageCount || 0) + ' msgs</span></div>';
+      html += '</div>';
+    }
+    html += '</div></div>';
+  }
+
+  S.body.innerHTML = html;
+
+  // Bind group header clicks
+  S.body.querySelectorAll('.sidebar-group-header').forEach(header => {
+    header.addEventListener('click', () => {
+      const cwd = header.dataset.cwd;
+      const items = header.nextElementSibling;
+      const chevron = header.querySelector('.sidebar-group-chevron');
+      const collapsed = items.classList.toggle('collapsed');
+      chevron.classList.toggle('open', !collapsed);
+      state.collapsedGroups[cwd] = collapsed;
+      persistCollapsedGroups();
+    });
+  });
+
+  // Bind session item clicks
+  S.body.querySelectorAll('.sidebar-item').forEach(item => {
+    item.addEventListener('click', () => {
+      S.body.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active'));
+      item.classList.add('active');
+    });
+  });
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // Init
