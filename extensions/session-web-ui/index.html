@@ -1803,6 +1803,146 @@ body {
   color: var(--text-danger);
 }
 
+/* ── Sidebar footer (new session button) ── */
+.sidebar-footer {
+  display: none;
+  flex-shrink: 0;
+  padding: var(--sp-2) var(--sp-2);
+  border-top: 1px solid var(--border-base);
+}
+
+.sidebar.open .sidebar-footer {
+  display: block;
+}
+
+.btn-new-session {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
+  width: 100%;
+  padding: var(--sp-2);
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--border-base);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-family: var(--font-body);
+  transition: all var(--duration-fast);
+}
+
+.btn-new-session:hover {
+  border-color: var(--border-accent);
+  background: var(--bg-accent-soft);
+  color: var(--text-accent);
+}
+
+/* ── Dialog / Modal ── */
+.dialog-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.45);
+  align-items: center;
+  justify-content: center;
+}
+
+.dialog-overlay.open {
+  display: flex;
+}
+
+.dialog {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  width: 400px;
+  max-width: 90vw;
+  padding: var(--sp-5);
+  animation: dialog-in 0.2s var(--ease-out);
+}
+
+@keyframes dialog-in {
+  from { opacity: 0; transform: scale(0.95) translateY(-8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.dialog-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-base);
+  margin-bottom: var(--sp-4);
+}
+
+.dialog-label {
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: var(--sp-1);
+}
+
+.dialog-input {
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-base);
+  background: var(--bg-input);
+  color: var(--text-base);
+  font-size: 0.8rem;
+  font-family: var(--font-mono);
+  outline: none;
+  transition: border-color var(--duration-fast);
+  margin-bottom: var(--sp-4);
+}
+
+.dialog-input:focus {
+  border-color: var(--border-accent);
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+
+.dialog-btn {
+  padding: var(--sp-2) var(--sp-4);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-base);
+  background: var(--bg-surface);
+  color: var(--text-base);
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-family: var(--font-body);
+  transition: all var(--duration-fast);
+}
+
+.dialog-btn:hover {
+  background: var(--bg-surface-hover);
+}
+
+.dialog-btn.primary {
+  background: var(--bg-accent);
+  border-color: var(--bg-accent);
+  color: var(--text-inverse);
+}
+
+.dialog-btn.primary:hover {
+  opacity: 0.9;
+}
+
+@media (max-width: 480px) {
+  .dialog {
+    width: 95vw;
+    padding: var(--sp-4);
+  }
+}
+
 /* ── Backdrop (mobile only) ── */
 .sidebar-backdrop {
   display: none;
@@ -1881,7 +2021,23 @@ body {
       <div class="spinner"></div>
     </div>
   </div>
+  <div class="sidebar-footer">
+    <button class="btn-new-session" id="btnNewSession">+ New session</button>
+  </div>
 </aside>
+
+<!-- New Session Dialog -->
+<div class="dialog-overlay" id="newSessionDialog">
+  <div class="dialog">
+    <div class="dialog-title">New Session</div>
+    <label class="dialog-label">Working directory</label>
+    <input class="dialog-input" id="newSessionCwdInput" type="text" placeholder="/path/to/project" autocomplete="off" spellcheck="false">
+    <div class="dialog-actions">
+      <button class="dialog-btn" id="btnDialogCancel">Cancel</button>
+      <button class="dialog-btn primary" id="btnDialogCreate">Create</button>
+    </div>
+  </div>
+</div>
 <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
 
 <div id="app">
@@ -3048,6 +3204,66 @@ function renderSessionList() {
     });
   });
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// New Session Dialog
+// ═══════════════════════════════════════════════════════════════════
+const N = {
+  btn: $('btnNewSession'),
+  dialog: $('newSessionDialog'),
+  input: $('newSessionCwdInput'),
+  cancel: $('btnDialogCancel'),
+  create: $('btnDialogCreate'),
+};
+
+function openNewSessionDialog() {
+  N.input.value = state.activeCwd || state.cwd || '';
+  N.dialog.classList.add('open');
+  setTimeout(() => N.input.focus(), 100);
+}
+
+function closeNewSessionDialog() {
+  N.dialog.classList.remove('open');
+}
+
+N.btn.addEventListener('click', openNewSessionDialog);
+N.cancel.addEventListener('click', closeNewSessionDialog);
+N.dialog.addEventListener('click', (e) => {
+  if (e.target === N.dialog) closeNewSessionDialog();
+});
+
+N.input.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') submitNewSession();
+  if (e.key === 'Escape') closeNewSessionDialog();
+});
+
+async function submitNewSession() {
+  const cwd = N.input.value.trim();
+  if (!cwd) return;
+  N.create.disabled = true;
+  N.create.textContent = 'Creating…';
+  try {
+    const r = await fetch('/session/new', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cwd }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      closeNewSessionDialog();
+      // Browser will auto-reconnect to the new session via SSE
+    } else {
+      alert(data.error || 'Failed to create session');
+    }
+  } catch (e) {
+    alert('Network error');
+  } finally {
+    N.create.disabled = false;
+    N.create.textContent = 'Create';
+  }
+}
+
+N.create.addEventListener('click', submitNewSession);
 
 // ═══════════════════════════════════════════════════════════════════
 // Init

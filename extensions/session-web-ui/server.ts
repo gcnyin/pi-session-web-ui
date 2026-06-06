@@ -36,6 +36,7 @@ interface ServerOptions {
   onSessionDetail: (id: string) => Promise<{ history: Record<string, unknown>[]; cwd: string; model?: { provider: string; name: string } } | null>;
   onCurrentHistory: () => Record<string, unknown>[];
   onSwitchSession: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
+  onNewSession: (cwd: string) => Promise<{ ok: boolean; error?: string; sessionId?: string }>;
   cwd: string;
   getStatus: () => Status;
   history?: Record<string, unknown>[];
@@ -145,6 +146,9 @@ export class WebServer {
         break;
       case "/session/switch":
         this.handleSwitchSession(req, res);
+        break;
+      case "/session/new":
+        this.handleNewSession(req, res);
         break;
       default:
         res.writeHead(404);
@@ -407,6 +411,32 @@ export class WebServer {
           return;
         }
         const result = await this.options.onSwitchSession(id);
+        res.writeHead(result.ok ? 200 : 400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: "Invalid JSON" }));
+      }
+    });
+  }
+
+  private async handleNewSession(req: IncomingMessage, res: ServerResponse) {
+    if (req.method !== "POST") {
+      res.writeHead(405);
+      res.end("Method Not Allowed");
+      return;
+    }
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", async () => {
+      try {
+        const { cwd } = JSON.parse(body);
+        if (!cwd || typeof cwd !== "string") {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: "cwd is required" }));
+          return;
+        }
+        const result = await this.options.onNewSession(cwd);
         res.writeHead(result.ok ? 200 : 400, { "Content-Type": "application/json" });
         res.end(JSON.stringify(result));
       } catch {

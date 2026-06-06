@@ -10,6 +10,8 @@ declare global {
   var __piWebServer: WebServer | undefined;
   // Active switch function — updated via withSession after each switch
   var __piWebSwitch: ((path: string) => Promise<void>) | undefined;
+  // Active new-session function — chained like switch
+  var __piWebNew: ((cwd: string) => Promise<void>) | undefined;
 }
 
 function loadSessionHistory(sessionFile: string): Record<string, unknown>[] {
@@ -128,6 +130,19 @@ export default function (pi: ExtensionAPI) {
           return { ok: false, error: e?.message ?? "Switch failed" };
         }
       },
+      onNewSession: async (cwd: string) => {
+        try {
+          const newFn = globalThis.__piWebNew;
+          if (!newFn) return { ok: false, error: "Not available — run /web first" };
+          if (isStreaming || agentActive) {
+            return { ok: false, error: "Agent is busy, please wait" };
+          }
+          await newFn(cwd);
+          return { ok: true };
+        } catch (e: any) {
+          return { ok: false, error: e?.message ?? "New session failed" };
+        }
+      },
       onCurrentHistory: () => loadSessionHistory(sessionFile || ""),
       cwd,
       history,
@@ -180,10 +195,23 @@ export default function (pi: ExtensionAPI) {
         await c.switchSession(path, {
           withSession: async (newC: any) => {
             globalThis.__piWebSwitch = makeSwitch(newC);
+            globalThis.__piWebNew = makeNew(newC);
+          },
+        });
+      };
+      const makeNew = (c: any) => async (targetCwd: string) => {
+        const sm = SessionManager.create(targetCwd);
+        sm.newSession();
+        const newPath = sm.getSessionFile()!;
+        await c.switchSession(newPath, {
+          withSession: async (newC: any) => {
+            globalThis.__piWebSwitch = makeSwitch(newC);
+            globalThis.__piWebNew = makeNew(newC);
           },
         });
       };
       globalThis.__piWebSwitch = makeSwitch(ctx);
+      globalThis.__piWebNew = makeNew(ctx);
       _modelRegistry = ctx.modelRegistry;
       currentCwd = ctx.cwd;
 
