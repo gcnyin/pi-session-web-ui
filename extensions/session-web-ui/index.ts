@@ -8,6 +8,8 @@ import { WebServer } from "./server";
 // session switches. The server outlives any single session.
 declare global {
   var __piWebServer: WebServer | undefined;
+  // Active switch function — updated via withSession after each switch
+  var __piWebSwitch: ((path: string) => Promise<void>) | undefined;
 }
 
 function loadSessionHistory(sessionFile: string): Record<string, unknown>[] {
@@ -115,8 +117,12 @@ export default function (pi: ExtensionAPI) {
           const sessions = await SessionManager.listAll();
           const found = sessions.find((s) => s.id === id);
           if (!found) return { ok: false, error: "Session not found" };
-          // Use /resume to switch — works regardless of command context lifecycle
-          pi.sendUserMessage(`/resume ${found.path}`);
+          if (isStreaming || agentActive) {
+            return { ok: false, error: "Agent is busy, please wait" };
+          }
+          const switchFn = globalThis.__piWebSwitch;
+          if (!switchFn) return { ok: false, error: "Switch not available — run /web first" };
+          await switchFn(found.path);
           return { ok: true };
         } catch (e: any) {
           return { ok: false, error: e?.message ?? "Switch failed" };
@@ -168,6 +174,15 @@ export default function (pi: ExtensionAPI) {
     aliases: ["web"],
     description: "Start web UI for viewing and interacting with the conversation",
     handler: async (_args, ctx) => {
+      // Set up session switching chain — each switch captures the next ctx
+      const makeSwitch = (c: any) => async (path: string) => {
+        await c.switchSession(path, {
+          withSession: async (newC: any) => {
+            globalThis.__piWebSwitch = makeSwitch(newC);
+          },
+        });
+      };
+      globalThis.__piWebSwitch = makeSwitch(ctx);
       _modelRegistry = ctx.modelRegistry;
       currentCwd = ctx.cwd;
 
