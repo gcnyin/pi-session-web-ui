@@ -1,128 +1,60 @@
-# Pi Web Assistant
+# Pi Web UI
 
-pi 扩展插件。通过 `/web` 命令启动本地 Web 服务器，在浏览器中实时查看和交互 pi 对话。
-
-设计灵感来自 `frontend-design` skill —— 大胆的美学方向、独特的字体排版、统一的主题系统。
+pi 扩展插件 —— 输入 `/web`，在浏览器中实时聊天。
 
 ## 功能
 
-- **实时聊天界面** — 通过 Server-Sent Events (SSE) 将消息、轮次、工具调用实时推送到浏览器
-- **双向交互** — 在浏览器中输入消息，通过 `POST /message` 发送给 pi
-- **工具调用可视化** — 可折叠卡片展示工具名称、参数和结果，每种工具有独立配色图标和状态指示
-- **思考过程** — 推理内容以可折叠面板展示
-- **流式渲染** — 助手消息实时流式输出，带闪烁光标
-- **会话侧边栏** — 浏览和切换历史会话，按工作目录分组（`Ctrl+B`）
-- **模型切换** — 点击模型徽章，在不同可用模型之间即时切换
-- **新建会话** — 从侧边栏创建新会话，支持自定义工作目录
-- **中断 / 停止** — 通过发送/停止合并按钮中断正在运行的 agent
-- **会话历史** — 执行 `/web` 时，已有对话历史立即展示在浏览器中
-- **Markdown 渲染** — 内置 `marked.js`，支持完整 GFM
-
-## 主题
-
-UI 内置**两套完整主题**，遵循 `frontend-design` 美学指南：
-
-| 主题 | 名称 | 氛围 | 色板 |
-|------|------|------|------|
-| 🌙 | **Dark**（暗色） | 温暖炭灰，铜色强调 | `#1a1410` 背景，`#e09060` 强调色 |
-| ☀️ | **Light**（亮色） | 暖白奶油，铜色强调 | `#f8f4ef` 背景，`#c08050` 强调色 |
-
-### 主题切换
-
-- **自动**（默认） — 跟随系统设置 `prefers-color-scheme`
-- **手动切换** — 点击顶栏 Theme 按钮循环：`System → Dark → Light`
-- **持久化** — 选择结果保存在 `localStorage` 中
-
-### 字体排版
-
-仅使用**系统本地字体**，无需下载 Web 字体，各平台一致：
-
-| 角色 | 字体 |
-|------|------|
-| 正文 / UI | CJK 优先 — PingFang SC (macOS)、Microsoft YaHei (Windows)、Noto Sans CJK SC (Linux)，回退至 system-ui |
-| 代码 | Cascadia Code / JetBrains Mono / Fira Code / SF Mono / IBM Plex Mono / Menlo — 各平台最佳等宽字体 |
-
-### 键盘快捷键
-
-| 按键 | 功能 |
-|------|------|
-| `/` | 聚焦输入框（当前不在输入框中时） |
-| `Ctrl+B` / `Cmd+B` | 打开/关闭会话侧边栏 |
-| `Enter` | 发送消息（agent 运行时则为中断） |
-| `Shift+Enter` | 输入换行 |
+- **实时流式** — 消息、工具调用、思考过程通过 SSE 实时推送
+- **双向交互** — 在浏览器中向 pi 发送消息
+- **会话侧边栏** — 浏览、切换、新建会话（`Ctrl+B`）
+- **模型切换** — 在 UI 中即时切换模型
+- **中断 / 停止** — 随时停止 agent
+- **Markdown** — 完整 GFM 支持，代码块语法高亮
+- **暖色主题** — 暗色/亮色自动检测，选择持久化到 `localStorage`
 
 ## 安装
 
-### 快速开始（自动发现）
-
 ```bash
-# 将扩展复制到 pi 的自动发现目录
+# 复制到 pi 的扩展目录
 mkdir -p ~/.pi/agent/extensions/session-web-ui
 cp -r extensions/session-web-ui/* ~/.pi/agent/extensions/session-web-ui/
 
-# 重启 pi 或执行 /reload
+# 然后重启 pi 或执行 /reload
 ```
 
-### 作为 pi 包安装（git）
-
-```bash
-pi install git:github.com/your-username/pi-session-web-ui
-```
-
-## 使用方法
+## 使用
 
 1. 正常启动 pi
-2. 在编辑器中输入 `/web` 并回车
+2. 输入 `/web`（或 `/web-ui`）
 3. 浏览器自动打开 `http://127.0.0.1:<port>`
-4. Web 界面实时展示所有对话内容
-5. 在浏览器底部输入框发送消息，远程与 pi 交互
 
-## 工作原理
+## 快捷键
 
-```
-┌─────────┐     SSE (事件流)    ┌──────────┐
-│   Pi    │ ──────────────────►  │ 浏览器  │
-│ (代理)  │                     │  (聊天)  │
-│         │ ◄────────────────── │          │
-└─────────┘   POST /message     └──────────┘
-```
-
-扩展监听 pi 的生命周期事件，并广播给所有连接的浏览器：
-
-| 事件 | 说明 |
+| 按键 | 功能 |
 |------|------|
-| `session_start` | 新会话开始 |
-| `agent_start` / `agent_end` | 代理生命周期 |
-| `turn_start` / `turn_end` | 轮次边界 |
-| `message_start` / `message_update` / `message_end` | 消息生命周期（含流式 token） |
-| `tool_execution_start` / `tool_execution_update` / `tool_execution_end` | 工具执行过程（含参数和结果） |
+| `/` | 聚焦输入框 |
+| `Ctrl+B` | 切换侧边栏 |
+| `Enter` | 发送 / 中断 |
+| `Shift+Enter` | 换行 |
 
-## 安全性
-
-- 服务器仅绑定 `127.0.0.1`（本地回环），不对外暴露
-- 无身份认证 —— 仅本机进程可访问
-- 仅在你明确输入 `/web` 后才会启动
-
-## 项目结构
+## 原理
 
 ```
-pi-session-web-ui/
-├── package.json                          # pi 包清单
-├── README.md
-├── README-zh_CN.md                       # 中文说明
-└── extensions/
-    └── session-web-ui/
-        ├── index.ts                      # 扩展入口（命令注册 + 事件监听）
-        ├── server.ts                     # HTTP + SSE 服务器实现
-        ├── index.html                    # 浏览器 UI（双主题、响应式、动效）
-        └── marked.js                     # 内置 Markdown 解析器 (GFM)
+Pi (agent)  ──SSE──►  浏览器
+            ◄─POST──
 ```
+
+扩展监听 pi 的生命周期事件（`message_start`、`tool_execution_*` 等），通过 SSE 广播给浏览器。
+
+## 安全
+
+- 仅绑定 `127.0.0.1`，不对外暴露
+- 无认证，仅限本机访问
+- 只有输入 `/web` 后才会启动
 
 ## 开发
 
 ```bash
-# 加载扩展进行测试
 pi -e ./extensions/session-web-ui/index.ts
-
-# 修改后，在 pi 中执行 /reload 热重载
+# 修改后在 pi 中执行 /reload
 ```
