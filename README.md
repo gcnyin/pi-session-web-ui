@@ -9,10 +9,15 @@ Designed with the `frontend-design` skill — bold editorial aesthetics, distinc
 - **Real-time chat UI** — All messages, turns, and tool calls stream to the browser as they happen via Server-Sent Events (SSE)
 - **Bi-directional** — Send messages to pi directly from the browser via `POST /message`
 - **Editorial message design** — Assistant messages appear without bubbles (clean, typographic), user messages as refined accent pills
-- **Tool call visibility** — Collapsible cards show tool names, arguments, and results with status indicators
+- **Tool call visibility** — Collapsible cards show tool names, arguments, and results with per-tool color-coded icons and status indicators
+- **Thinking blocks** — Reasoning content displayed in collapsible, syntax-highlighted panels
 - **Streaming support** — Assistant messages stream in real-time with live cursor
+- **Session sidebar** — Browse and switch between past sessions grouped by working directory (`Ctrl+B`)
+- **Model switching** — Click the model badge to switch between available models on the fly
+- **New session creation** — Create new sessions from the sidebar with a custom working directory
+- **Interrupt / stop** — Stop the agent mid-stream via the combined send/stop button
 - **Session history** — When you run `/web-ui`, existing conversation history is immediately shown in the browser
-- **Zero external dependencies** — Uses only Node.js built-in modules (`http`, `fs`, `child_process`)
+- **Markdown rendering** — Full GFM support via bundled `marked.js`
 
 ## Design Direction — "Warm Modern"
 
@@ -22,13 +27,13 @@ The UI blends clean modern structure with warm, inviting colors — soft copper/
 
 | Theme | Name | Mood | Palette |
 |-------|------|------|---------|
-| 🌙 | **Nocturnal** (dark) | Warm charcoal, copper/amber accents | `#1a1714` background, `#c97a4a` accent |
-| ☀️ | **Daylight** (light) | Warm cream, copper accents | `#f8f4ef` background, `#b87a4a` accent |
+| 🌙 | **Dark** | Warm charcoal, copper accents | `#1a1410` background, `#e09060` accent |
+| ☀️ | **Light** | Warm cream, copper accents | `#f8f4ef` background, `#c08050` accent |
 
 ### Theme Switching
 
 - **Auto** (default) — Follows your system preference via `prefers-color-scheme`
-- **Manual toggle** — Click the Theme button in the header to cycle: `System → Nocturnal → Daylight`
+- **Manual toggle** — Click the Theme button in the header to cycle: `System → Dark → Light`
 - **Persistent** — Your choice is saved in `localStorage`
 
 ### Typography
@@ -37,8 +42,8 @@ Uses **system-local fonts** only — no web font downloads, consistent across al
 
 | Role | Font Stack |
 |------|-----------|
-| Body / UI | System UI stack — native San Francisco (macOS), Segoe UI (Windows), Roboto (Android), Ubuntu (Linux) |
-| Code | **Cascadia Code** / SF Mono / Fira Code / Menlo / Consolas — best available monospace per platform |
+| Body / UI | CJK-first — PingFang SC (macOS), Microsoft YaHei (Windows), Noto Sans CJK SC (Linux), with system-ui fallbacks |
+| Code | Cascadia Code / JetBrains Mono / Fira Code / SF Mono / IBM Plex Mono / Menlo — best available monospace per platform |
 
 ### Visual Details
 
@@ -47,8 +52,17 @@ Uses **system-local fonts** only — no web font downloads, consistent across al
 - **Friendly rounding** — `4px` base radius, warm and approachable
 - **Glass input** — Input area with backdrop blur and copper glow on focus
 - **Staggered animations** — Messages fade in with a gentle upward motion
-- **Tool cards** — Minimal bordered panels with warm icon accents
-- **Minimal header** — Just π logo + model badge + status dot, no extraneous text
+- **Tool cards** — Minimal bordered panels with per-tool color-coded icons
+- **Connection chip** — Status indicator with colored dot and label (connected / disconnected / reconnecting)
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `/` | Focus the input box (when not already in an input) |
+| `Ctrl+B` / `Cmd+B` | Toggle the session sidebar |
+| `Enter` | Send message (or interrupt if agent is active) |
+| `Shift+Enter` | New line in input |
 
 ## Installation
 
@@ -112,7 +126,8 @@ pi-session-web-ui/
     └── session-web-ui/
         ├── index.ts                      # Extension entry point (commands + event listeners)
         ├── server.ts                     # HTTP + SSE server implementation
-        └── index.html                    # Browser UI (dual-theme, responsive, animated)
+        ├── index.html                    # Browser UI (dual-theme, responsive, animated)
+        └── marked.js                     # Bundled markdown parser (GFM)
 ```
 
 ## Development
