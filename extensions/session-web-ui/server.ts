@@ -242,12 +242,10 @@ export class WebServer {
     }
     this.sendEvent(client, "connected", JSON.stringify(statusData));
 
-    // Flush any queued events
-    if (this.eventQueue.length > 0) {
-      for (const queued of this.eventQueue) {
-        this.sendEvent(client, queued.event, queued.data);
-      }
-    }
+    // Clear stale queued events — the "connected" event above
+    // already carries the complete session history, so replaying
+    // old message_start/message_end/etc. would double-render.
+    this.eventQueue.length = 0;
 
     // Heartbeat every 30s
     const heartbeat = setInterval(() => {

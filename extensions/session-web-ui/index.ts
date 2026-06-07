@@ -185,33 +185,35 @@ export default function (pi: ExtensionAPI) {
     return existing;
   }
 
+  // ── Helpers for session switching chain ───────────────────
+  function setupSessionGlobals(ctx: any) {
+    const makeSwitch = (c: any) => async (path: string) => {
+      await c.switchSession(path, {
+        withSession: async (newC: any) => {
+          setupSessionGlobals(newC);
+        },
+      });
+    };
+    const makeNew = (c: any) => async (targetCwd: string) => {
+      const sm = SessionManager.create(targetCwd);
+      sm.newSession();
+      const newPath = sm.getSessionFile()!;
+      await c.switchSession(newPath, {
+        withSession: async (newC: any) => {
+          setupSessionGlobals(newC);
+        },
+      });
+    };
+    globalThis.__piWebSwitch = makeSwitch(ctx);
+    globalThis.__piWebNew = makeNew(ctx);
+  }
+
   // ── Command: /web-ui (and alias /web) ──────────────────────
   pi.registerCommand("web-ui", {
     aliases: ["web"],
     description: "Start web UI for viewing and interacting with the conversation",
     handler: async (_args, ctx) => {
-      // Set up session switching chain — each switch captures the next ctx
-      const makeSwitch = (c: any) => async (path: string) => {
-        await c.switchSession(path, {
-          withSession: async (newC: any) => {
-            globalThis.__piWebSwitch = makeSwitch(newC);
-            globalThis.__piWebNew = makeNew(newC);
-          },
-        });
-      };
-      const makeNew = (c: any) => async (targetCwd: string) => {
-        const sm = SessionManager.create(targetCwd);
-        sm.newSession();
-        const newPath = sm.getSessionFile()!;
-        await c.switchSession(newPath, {
-          withSession: async (newC: any) => {
-            globalThis.__piWebSwitch = makeSwitch(newC);
-            globalThis.__piWebNew = makeNew(newC);
-          },
-        });
-      };
-      globalThis.__piWebSwitch = makeSwitch(ctx);
-      globalThis.__piWebNew = makeNew(ctx);
+      setupSessionGlobals(ctx);
       _modelRegistry = ctx.modelRegistry;
       currentCwd = ctx.cwd;
 
@@ -239,6 +241,7 @@ export default function (pi: ExtensionAPI) {
 
   // ── Session events ─────────────────────────────────────────
   pi.on("session_start", async (event, ctx) => {
+    setupSessionGlobals(ctx);
     _modelRegistry = ctx.modelRegistry;
     currentCwd = ctx.cwd;
 
