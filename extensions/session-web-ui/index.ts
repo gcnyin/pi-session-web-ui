@@ -168,7 +168,9 @@ export default function (pi: ExtensionAPI) {
     if (!existing) {
       // First time: create and start
       const server = new WebServer(buildServerOptions(cwd, history));
-      await server.start();
+      const port = parseInt(process.env.PI_WEB_PORT || "9876", 10);
+      const host = process.env.PI_WEB_HOST || "0.0.0.0";
+      await server.start(port, host);
       globalThis.__piWebServer = server;
       return server;
     }
@@ -226,16 +228,23 @@ export default function (pi: ExtensionAPI) {
       const history = loadSessionHistory(sessionFile || "");
 
       const server = await ensureServer(ctx.cwd, history, "startup");
-      const url = `http://127.0.0.1:${server.port}`;
-      ctx.ui.notify(`Web UI at ${url}`, "success");
+      const addresses = server.getAddresses();
+      const primaryUrl = addresses[0] || `http://127.0.0.1:${server.port}`;
+      
+      // Show all addresses in notification
+      if (addresses.length > 1) {
+        ctx.ui.notify(`Web UI at:\n${addresses.join("\n")}`, "success");
+      } else {
+        ctx.ui.notify(`Web UI at ${primaryUrl}`, "success");
+      }
 
       // Open browser
       const { exec } = await import("node:child_process");
       const { platform } = await import("node:os");
       const os = platform();
-      if (os === "darwin") exec(`open "${url}"`);
-      else if (os === "linux") exec(`xdg-open "${url}"`);
-      else if (os === "win32") exec(`start "" "${url}"`);
+      if (os === "darwin") exec(`open "${primaryUrl}"`);
+      else if (os === "linux") exec(`xdg-open "${primaryUrl}"`);
+      else if (os === "win32") exec(`start "" "${primaryUrl}"`);
     },
   });
 

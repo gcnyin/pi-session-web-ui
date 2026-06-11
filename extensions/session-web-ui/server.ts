@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { networkInterfaces } from "node:os";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -444,10 +445,11 @@ export class WebServer {
     });
   }
 
-  async start(port?: number): Promise<number> {
+  async start(port?: number, host?: string): Promise<number> {
     const p = port ?? parseInt(process.env.PI_WEB_PORT || "9876", 10);
+    const h = host ?? process.env.PI_WEB_HOST ?? "0.0.0.0";
     return new Promise((resolve, reject) => {
-      this.server.listen(p, "127.0.0.1", () => {
+      this.server.listen(p, h, () => {
         const addr = this.server.address();
         if (addr && typeof addr === "object") {
           this._port = addr.port;
@@ -456,6 +458,50 @@ export class WebServer {
       });
       this.server.on("error", reject);
     });
+  }
+
+  /**
+   * Get all addresses the server is listening on.
+   * Returns an array of URLs (e.g., ["http://127.0.0.1:9876", "http://192.168.1.100:9876"])
+   */
+  getAddresses(): string[] {
+    const addr = this.server.address();
+    if (!addr || typeof addr === "string") return [];
+
+    const port = addr.port;
+    const addresses: string[] = [];
+
+    // If listening on a specific address, just return that
+    if (addr.address !== "0.0.0.0" && addr.address !== "::") {
+      const host = addr.address.includes(":") ? `[${addr.address}]` : addr.address;
+      return [`http://${host}:${port}`];
+    }
+
+    // Listening on all interfaces — enumerate all non-internal IPv4/IPv6 addresses
+    const nets = networkInterfaces();
+    for (const [name, interfaces] of Object.entries(nets)) {
+      if (!interfaces) continue;
+      for (const iface of interfaces) {
+        // Skip internal (loopback) and non-IPv4 when listening on 0.0.0.0
+        if (iface.internal) continue;
+        if (addr.address === "0.0.0.0" && iface.family !== "IPv4") continue;
+        if (addr.address === "::" && iface.family !== "IPv6") continue;
+
+        const host = iface.family === "IPv6" ? `[${iface.address}]` : iface.address;
+        const url = `http://${host}:${port}`;
+        if (!addresses.includes(url)) {
+          addresses.push(url);
+        }
+      }
+    }
+
+    // Always include localhost
+    const localhost = `http://127.0.0.1:${port}`;
+    if (!addresses.includes(localhost)) {
+      addresses.unshift(localhost);
+    }
+
+    return addresses;
   }
 
   stop() {

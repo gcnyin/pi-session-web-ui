@@ -26,7 +26,18 @@ cp -r extensions/session-web-ui/* ~/.pi/agent/extensions/session-web-ui/
 
 1. Start pi as usual
 2. Type `/web` (or `/web-ui`)
-3. Browser opens automatically at `http://127.0.0.1:<port>`
+3. Browser opens automatically at the first available address
+
+## Configuration
+
+You can configure the server using environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PI_WEB_PORT` | `9876` | Port to listen on. Set to `0` for a random port. |
+| `PI_WEB_HOST` | `0.0.0.0` | Address to bind to. Defaults to all interfaces. Set to `127.0.0.1` to restrict to localhost only. |
+
+When listening on all interfaces (`0.0.0.0`), the server will list all available addresses in the notification, making it easy to access from other devices on the network.
 
 ## Shortcuts
 
@@ -48,8 +59,9 @@ The extension hooks into pi's lifecycle events (`message_start`, `tool_execution
 
 ## Security
 
-- Binds to `127.0.0.1` only — not network-accessible
-- No auth — localhost only
+- **Default**: Binds to `0.0.0.0` — accessible from the network
+- No auth — **do not expose to untrusted networks**
+- Set `PI_WEB_HOST=127.0.0.1` to restrict to localhost only
 - Only runs when you type `/web`
 
 ## Dev

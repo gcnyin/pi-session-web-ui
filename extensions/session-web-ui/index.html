@@ -458,33 +458,6 @@ textarea:focus-visible,
 .header-cwd:hover { border-color: var(--border-strong); }
 .header-cwd svg { flex-shrink: 0; width: 12px; height: 12px; opacity: 0.6; }
 
-/* Thinking indicator */
-.thinking-indicator {
-  display: flex; align-items: center; gap: 6px; height: 32px;
-  font-size: var(--text-xs); color: var(--text-accent); font-weight: 500;
-  padding: 0 var(--sp-3); border-radius: var(--radius-sm);
-  background: var(--bg-accent-soft); border: 1px solid var(--border-accent);
-  box-sizing: border-box; animation: think-glow 2s ease-in-out infinite;
-}
-@keyframes think-glow {
-  0%, 100% { box-shadow: 0 0 0 0 var(--bg-accent-glow); }
-  50% { box-shadow: 0 0 16px 2px var(--bg-accent-glow); }
-}
-
-.thinking-dots { display: flex; gap: 3px; }
-.thinking-dots span {
-  width: 4px; height: 4px; border-radius: 50%;
-  background: var(--text-accent); animation: thinkBounce 1.4s infinite ease-in-out both;
-}
-.thinking-dots span:nth-child(1) { animation-delay: -0.32s; }
-.thinking-dots span:nth-child(2) { animation-delay: -0.16s; }
-.thinking-dots span:nth-child(3) { animation-delay: 0s; }
-
-@keyframes thinkBounce {
-  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
-  40% { transform: scale(1); opacity: 1; }
-}
-
 /* Theme toggle — SVG icons */
 .theme-toggle {
   display: flex; align-items: center; justify-content: center;
@@ -501,12 +474,13 @@ textarea:focus-visible,
 
 /* ── Model Select Popup ── */
 .model-popup {
-  position: absolute; top: calc(100% + 6px); left: 0;
+  position: fixed; top: auto; left: auto;
   min-width: 240px; max-width: 360px; max-height: 360px;
   overflow-y: auto; background: var(--bg-elevated);
   border: 1px solid var(--border-strong); border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg); z-index: 100; padding: var(--sp-1) 0;
+  box-shadow: var(--shadow-lg); z-index: 1000; padding: var(--sp-1) 0;
   animation: popup-enter var(--duration-fast) var(--ease-out);
+  /* Will be positioned via JavaScript */
 }
 @keyframes popup-enter {
   from { opacity: 0; transform: translateY(-4px); }
@@ -1177,23 +1151,37 @@ textarea:focus-visible,
     padding: var(--sp-3) 0;
     padding-inline: var(--sp-4);
     gap: var(--sp-2);
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+  .header-left { 
+    gap: var(--sp-2); 
+    flex-wrap: wrap;
+    min-width: 0;
+    flex: 1;
+    order: 1;
+  }
+  .header-right { 
+    gap: var(--sp-2); 
+    flex-shrink: 0;
+    order: 2;
+    margin-left: auto;
   }
   .header-cwd { display: none; }
-  .model-badge { font-size: var(--text-xs); padding: 2px 10px; }
-  .model-name { max-width: 100px; }
+  .model-badge { font-size: var(--text-xs); padding: 2px 10px; min-width: 0; }
+  .model-name { max-width: 80px; }
   .messages-container { padding-top: var(--sp-4); padding-bottom: var(--sp-4); }
   .messages-list { gap: var(--sp-4); }
-  .message-content { font-size: var(--text-base) !important; }
+  .message-content { font-size: var(--text-sm) !important; line-height: 1.5; }
   .message.user .message-content { padding: var(--sp-2) var(--sp-4); max-width: 92%; }
-  .message-content pre { font-size: var(--text-sm); padding: var(--sp-3); }
+  .message-content pre { font-size: var(--text-xs); padding: var(--sp-3); }
   .tool-card-header { padding: var(--sp-2) var(--sp-3); }
   .tool-subtitle { display: none; }
   .input-container { padding: var(--sp-3) 0 var(--sp-4); }
   .input-wrapper { padding: var(--sp-1) var(--sp-1) var(--sp-1) var(--sp-4); border-radius: var(--radius-md); }
-  #messageInput { font-size: var(--text-base); }
+  #messageInput { font-size: var(--text-sm); }
   .empty-state { padding: var(--sp-10) var(--sp-4); }
-  .empty-state-title { font-size: var(--text-xl); }
-  .thinking-indicator .thinking-dots { display: none; }
+  .empty-state-title { font-size: var(--text-lg); }
 
   .sidebar.open { width: 280px; }
   .sidebar.open + .sidebar-backdrop { display: block; }
@@ -1206,16 +1194,25 @@ textarea:focus-visible,
   .header {
     padding: var(--sp-2) 0;
     padding-inline: var(--sp-3);
+    gap: var(--sp-1);
   }
-  .header-left { gap: var(--sp-2); }
+  .header-left { gap: var(--sp-1); }
   .header-logo { width: 28px; height: 28px; font-size: var(--text-md); }
-  .model-badge { font-size: var(--text-2xs); padding: 2px 8px; }
+  .model-badge { font-size: var(--text-2xs); padding: 2px 8px; min-width: 0; }
   .model-name { display: none; }
   .model-sep { display: none; }
-  .message.user .message-content { max-width: 100%; border-radius: var(--radius-md) var(--radius-md) var(--radius-sm) var(--radius-md); }
+  .connection-chip { display: none; }
+  .message-content { font-size: var(--text-xs) !important; line-height: 1.4; }
+  .message.user .message-content { max-width: 100%; border-radius: var(--radius-md) var(--radius-md) var(--radius-sm) var(--radius-md); padding: var(--sp-2) var(--sp-3); }
   .tool-status { font-size: var(--text-2xs); padding: 1px 6px; }
-  .thinking-indicator { font-size: var(--text-2xs); padding: 2px 10px; }
-  .dialog { width: 95vw; padding: var(--sp-4); }
+  .tool-card-header { padding: var(--sp-1) var(--sp-2); }
+  .tool-label { font-size: var(--text-sm); }
+  .tool-subtitle { font-size: var(--text-2xs); }
+  .tool-card-body { font-size: var(--text-2xs); padding: var(--sp-2); }
+  .tool-card-body pre { font-size: var(--text-2xs); padding: var(--sp-2); }
+  .empty-state-title { font-size: var(--text-md); }
+  .empty-state-desc { font-size: var(--text-sm); }
+  .dialog { width: 95vw; padding: var(--sp-3); }
 
   .sidebar.open { width: 85vw; max-width: 300px; }
   .sidebar-header { min-height: 40px; }
@@ -1224,6 +1221,17 @@ textarea:focus-visible,
   .sidebar-item-cwd { font-size: var(--text-2xs); }
   .sidebar-item-title { font-size: var(--text-xs); }
   .sidebar-item-meta { font-size: var(--text-2xs); }
+  
+  /* Mobile model popup adjustments */
+  .model-popup {
+    min-width: 200px;
+    max-width: 300px;
+    max-height: 300px;
+    font-size: var(--text-sm);
+  }
+  .model-popup-item {
+    padding: var(--sp-2) var(--sp-2);
+  }
 }
 </style>
 <script src="marked.js"></script>
@@ -1286,10 +1294,6 @@ textarea:focus-visible,
         <span class="connection-chip-dot"></span>
         <span class="connection-chip-label">disconnected</span>
       </span>
-      <div class="thinking-indicator hidden" id="thinkingIndicator">
-        <span>thinking</span>
-        <div class="thinking-dots"><span></span><span></span><span></span></div>
-      </div>
       <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">
         <span id="themeIcon">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>

@@ -345,7 +345,6 @@ function refresh() {
   } else {
     D.cwd.classList.add('hidden');
   }
-  D.thinkInd.classList.toggle('hidden', !(state.thinking && state.connected));
   updateSendBtn();
   if (state.modelPopupOpen) updatePopupCheck();
 }
@@ -365,7 +364,50 @@ async function openModelPopup() {
 
   const popup = mkEl('div', 'model-popup');
   popup.innerHTML = '<div class="model-popup-loading"><div class="spinner"></div><div style="margin-top:8px">Loading models...</div></div>';
-  D.modelBadge.appendChild(popup);
+  
+  // Position popup using fixed positioning
+  const badgeRect = D.modelBadge.getBoundingClientRect();
+  popup.style.position = 'fixed';
+  
+  // Calculate initial position
+  let top = badgeRect.bottom + 6;
+  let left = badgeRect.left;
+  
+  // Get viewport dimensions
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  
+  // Adjust for mobile screens
+  const isMobile = viewportWidth <= 768;
+  const popupWidth = isMobile ? 300 : 360;
+  const popupMaxHeight = isMobile ? 300 : 360;
+  
+  // Ensure popup doesn't go off right edge
+  if (left + popupWidth > viewportWidth - 16) {
+    left = viewportWidth - popupWidth - 16;
+  }
+  
+  // Ensure popup doesn't go off left edge
+  if (left < 16) {
+    left = 16;
+  }
+  
+  // Check if popup would go off bottom
+  if (top + popupMaxHeight > viewportHeight - 16) {
+    // Try positioning above the badge
+    const aboveTop = badgeRect.top - popupMaxHeight - 6;
+    if (aboveTop >= 16) {
+      top = aboveTop;
+    } else {
+      // If it doesn't fit above either, position at top of viewport with padding
+      top = 16;
+    }
+  }
+  
+  popup.style.top = top + 'px';
+  popup.style.left = left + 'px';
+  
+  document.body.appendChild(popup);
   state.modelPopupEl = popup;
 
   try {
