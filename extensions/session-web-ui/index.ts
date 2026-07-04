@@ -191,9 +191,16 @@ export default function (pi: ExtensionAPI) {
     }
 
     if (reason === "reload") {
-      // Reload: refresh HTML from disk, update all options
-      existing.reloadHtml();
-      existing.updateOptions(buildServerOptions(cwd, history));
+      // Reload: stop the old server and create a new one on the same port
+      const port = existing.port;
+      existing.stop();
+      servers.delete(sessionId);
+
+      const server = new WebServer(buildServerOptions(cwd, history));
+      server.setSessionId(sessionId);
+      await server.start(port);
+      servers.set(sessionId, server);
+      return server;
     } else {
       // Session change (new/resume/fork): just update options
       existing.updateOptions(buildServerOptions(cwd, history));
@@ -247,22 +254,22 @@ export default function (pi: ExtensionAPI) {
     const history = loadSessionHistory(sessionFile || "");
     const server = await ensureServer(ctx.cwd, history, event.reason);
     
-    // Auto-open browser and show URL on first session start
-    if (server && event.reason === "startup") {
+    // Update widget with URL (always, since port may change on reload)
+    if (server) {
       const addresses = server.getAddresses();
-      const primaryUrl = addresses[0] || `http://127.0.0.1:${server.port}`;
-      
-      // Show URL widget above editor
       const widgetLines = addresses.map(a => `  ${a}`);
       ctx.ui.setWidget("web-ui", [`Web UI:`, ...widgetLines]);
 
-      // Open browser
-      const { exec } = await import("node:child_process");
-      const { platform } = await import("node:os");
-      const os = platform();
-      if (os === "darwin") exec(`open "${primaryUrl}"`);
-      else if (os === "linux") exec(`xdg-open "${primaryUrl}"`);
-      else if (os === "win32") exec(`start "" "${primaryUrl}"`);
+      // Auto-open browser on first session start only
+      if (event.reason === "startup") {
+        const primaryUrl = addresses[0] || `http://127.0.0.1:${server.port}`;
+        const { exec } = await import("node:child_process");
+        const { platform } = await import("node:os");
+        const os = platform();
+        if (os === "darwin") exec(`open "${primaryUrl}"`);
+        else if (os === "linux") exec(`xdg-open "${primaryUrl}"`);
+        else if (os === "win32") exec(`start "" "${primaryUrl}"`);
+      }
     }
 
     // Push new session data to all browser clients (handles session switch)
