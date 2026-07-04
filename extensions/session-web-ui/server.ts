@@ -6,6 +6,21 @@ import { networkInterfaces } from "node:os";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+interface UsageStats {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  reasoning: number | null;
+  cacheHitRate: number;
+}
+
+interface ContextStats {
+  tokens: number | null;
+  window: number;
+  maxTokens: number;
+}
+
 interface Status {
   connected: boolean;
   streaming: boolean;
@@ -14,18 +29,9 @@ interface Status {
   model?: { provider: string; name: string };
   cwd?: string;
   sessionId?: string;
+  usage?: UsageStats;
+  context?: ContextStats;
   history?: Record<string, unknown>[];
-}
-
-export interface SessionInfo {
-  path: string;
-  id: string;
-  cwd: string;
-  name?: string;
-  created: string;
-  modified: string;
-  messageCount: number;
-  firstMessage: string;
 }
 
 interface ServerOptions {
@@ -33,11 +39,6 @@ interface ServerOptions {
   onInterrupt: () => void;
   onModels: () => Promise<{ provider: string; id: string; name: string }[]>;
   onModelSwitch: (provider: string, modelId: string) => Promise<{ ok: boolean; error?: string }>;
-  onSessions: () => Promise<SessionInfo[]>;
-  onSessionDetail: (id: string) => Promise<{ history: Record<string, unknown>[]; cwd: string; model?: { provider: string; name: string } } | null>;
-  onCurrentHistory: () => Record<string, unknown>[];
-  onSwitchSession: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
-  onNewSession: (cwd: string) => Promise<{ ok: boolean; error?: string; sessionId?: string }>;
   cwd: string;
   getStatus: () => Status;
   history?: Record<string, unknown>[];
@@ -54,6 +55,7 @@ export class WebServer {
   private clientIdCounter = 0;
   private options: ServerOptions;
   private _port = 0;
+  private _sessionId: string | undefined;
   private htmlContent: string;
   private closed = false;
   private eventQueue: Array<{ event: string; data: string }> = [];
@@ -61,6 +63,10 @@ export class WebServer {
 
   get port() {
     return this._port;
+  }
+
+  get sessionId() {
+    return this._sessionId;
   }
 
   constructor(options: ServerOptions) {
@@ -96,6 +102,11 @@ export class WebServer {
   /** Update session-bound options without restarting the server */
   updateOptions(partial: Partial<ServerOptions>): void {
     Object.assign(this.options, partial);
+  }
+
+  /** Set the session ID this server is bound to */
+  setSessionId(id: string): void {
+    this._sessionId = id;
   }
 
   private handleRequest(req: IncomingMessage, res: ServerResponse) {
@@ -141,15 +152,6 @@ export class WebServer {
         break;
       case "/model":
         this.handleModel(req, res);
-        break;
-      case "/sessions":
-        this.handleSessions(req, res);
-        break;
-      case "/session/switch":
-        this.handleSwitchSession(req, res);
-        break;
-      case "/session/new":
-        this.handleNewSession(req, res);
         break;
       default:
         res.writeHead(404);
@@ -215,9 +217,6 @@ export class WebServer {
       "X-Accel-Buffering": "no",
     });
 
-    const url = new URL(_req.url ?? "/", `http://${_req.headers.host ?? "localhost"}`);
-    const sessionId = url.searchParams.get("id");
-
     const client: SseClient = {
       id: ++this.clientIdCounter,
       res,
@@ -225,22 +224,7 @@ export class WebServer {
 
     this.clients.add(client);
 
-    // Load history: if ?id= is present, fetch that session's detail
-    let statusData = this.options.getStatus();
-    if (sessionId) {
-      try {
-        const detail = await this.options.onSessionDetail(sessionId);
-        if (detail) {
-          statusData = { ...statusData, cwd: detail.cwd, model: detail.model };
-          statusData.history = detail.history;
-          statusData.sessionId = sessionId;
-        }
-      } catch { /* fall back to current session */ }
-    }
-    // Always use fresh history (not cached snapshot)
-    if (!statusData.history) {
-      statusData.history = this.options.onCurrentHistory();
-    }
+    const statusData = this.options.getStatus();
     this.sendEvent(client, "connected", JSON.stringify(statusData));
 
     // Clear stale queued events — the "connected" event above
@@ -377,76 +361,11 @@ export class WebServer {
     });
   }
 
-  private async handleSessions(_req: IncomingMessage, res: ServerResponse) {
-    if (_req.method !== "GET") {
-      res.writeHead(405);
-      res.end("Method Not Allowed");
-      return;
-    }
-    try {
-      const sessions = await this.options.onSessions();
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ sessions }));
-    } catch (e: any) {
-      res.writeHead(500);
-      res.end(JSON.stringify({ error: e?.message ?? "Failed to list sessions" }));
-    }
-  }
 
-  private async handleSwitchSession(req: IncomingMessage, res: ServerResponse) {
-    if (req.method !== "POST") {
-      res.writeHead(405);
-      res.end("Method Not Allowed");
-      return;
-    }
-    let body = "";
-    req.on("data", (chunk) => (body += chunk));
-    req.on("end", async () => {
-      try {
-        const { id } = JSON.parse(body);
-        if (!id) {
-          res.writeHead(400);
-          res.end(JSON.stringify({ error: "Session id required" }));
-          return;
-        }
-        const result = await this.options.onSwitchSession(id);
-        res.writeHead(result.ok ? 200 : 400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify(result));
-      } catch {
-        res.writeHead(400);
-        res.end(JSON.stringify({ error: "Invalid JSON" }));
-      }
-    });
-  }
-
-  private async handleNewSession(req: IncomingMessage, res: ServerResponse) {
-    if (req.method !== "POST") {
-      res.writeHead(405);
-      res.end("Method Not Allowed");
-      return;
-    }
-    let body = "";
-    req.on("data", (chunk) => (body += chunk));
-    req.on("end", async () => {
-      try {
-        const { cwd } = JSON.parse(body);
-        if (!cwd || typeof cwd !== "string") {
-          res.writeHead(400);
-          res.end(JSON.stringify({ error: "cwd is required" }));
-          return;
-        }
-        const result = await this.options.onNewSession(cwd);
-        res.writeHead(result.ok ? 200 : 400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify(result));
-      } catch {
-        res.writeHead(400);
-        res.end(JSON.stringify({ error: "Invalid JSON" }));
-      }
-    });
-  }
 
   async start(port?: number, host?: string): Promise<number> {
-    const p = port ?? parseInt(process.env.PI_WEB_PORT || "9876", 10);
+    // port=0 means OS picks a random available port
+    const p = port ?? 0;
     const h = host ?? process.env.PI_WEB_HOST ?? "0.0.0.0";
     return new Promise((resolve, reject) => {
       this.server.listen(p, h, () => {
@@ -470,6 +389,7 @@ export class WebServer {
 
     const port = addr.port;
     const addresses: string[] = [];
+    let localhost = `http://127.0.0.1:${port}`;
 
     // If listening on a specific address, just return that
     if (addr.address !== "0.0.0.0" && addr.address !== "::") {
@@ -495,11 +415,9 @@ export class WebServer {
       }
     }
 
-    // Always include localhost
-    const localhost = `http://127.0.0.1:${port}`;
-    if (!addresses.includes(localhost)) {
-      addresses.unshift(localhost);
-    }
+    // Put localhost at the end — prefer LAN addresses
+    // so browser opens the LAN URL and others can access
+    addresses.push(localhost);
 
     return addresses;
   }

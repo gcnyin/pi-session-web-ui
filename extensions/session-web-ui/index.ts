@@ -5,13 +5,10 @@ import { WebServer } from "./server";
 
 // ── Global state ────────────────────────────────────────────
 // Stored on globalThis so it survives extension reloads and
-// session switches. The server outlives any single session.
+// session switches. Each session has its own server with a random port.
 declare global {
-  var __piWebServer: WebServer | undefined;
-  // Active switch function — updated via withSession after each switch
-  var __piWebSwitch: ((path: string) => Promise<void>) | undefined;
-  // Active new-session function — chained like switch
-  var __piWebNew: ((cwd: string) => Promise<void>) | undefined;
+  // Map<sessionId, WebServer> — each session gets its own server instance
+  var __piWebServers: Map<string, WebServer> | undefined;
 }
 
 function loadSessionHistory(sessionFile: string): Record<string, unknown>[] {
@@ -37,6 +34,70 @@ export default function (pi: ExtensionAPI) {
   let sessionId: string | undefined;
   let sessionFile: string | undefined;
   let _modelRegistry: any = undefined;
+  let _contextWindow = 0;
+  let _maxTokens = 0;
+
+  // ── Usage accumulation state ─────────────────────────────
+  const usage = {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    reasoning: 0,
+    hasReasoning: false, // whether any message reported reasoning tokens
+  };
+  let contextTokens: number | null = null; // null = unknown (e.g. after compaction)
+
+  function resetUsage() {
+    usage.input = 0;
+    usage.output = 0;
+    usage.cacheRead = 0;
+    usage.cacheWrite = 0;
+    usage.reasoning = 0;
+    usage.hasReasoning = false;
+    contextTokens = null;
+  }
+
+  function accumulateUsage(msg: any) {
+    if (!msg || msg.role !== 'assistant' || !msg.usage) return;
+    const u = msg.usage;
+    usage.input += u.input ?? 0;
+    usage.output += u.output ?? 0;
+    usage.cacheRead += u.cacheRead ?? 0;
+    usage.cacheWrite += u.cacheWrite ?? 0;
+    if (u.reasoning != null) {
+      usage.reasoning += u.reasoning;
+      usage.hasReasoning = true;
+    }
+    // Update context tokens from totalTokens (input side represents context size)
+    const total = u.totalTokens ?? ((u.input ?? 0) + (u.output ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0));
+    if (total > 0) {
+      contextTokens = total;
+    }
+  }
+
+  function getUsageStats() {
+    const totalCache = usage.cacheRead + usage.cacheWrite;
+    const cacheHitRate = (usage.input + totalCache) > 0
+      ? (usage.cacheRead / (usage.input + totalCache)) * 100
+      : 0;
+    return {
+      input: usage.input,
+      output: usage.output,
+      cacheRead: usage.cacheRead,
+      cacheWrite: usage.cacheWrite,
+      reasoning: usage.hasReasoning ? usage.reasoning : null,
+      cacheHitRate,
+    };
+  }
+
+  function getContextStats() {
+    return {
+      tokens: contextTokens,
+      window: _contextWindow,
+      maxTokens: _maxTokens,
+    };
+  }
 
   // ── Server lifecycle ──────────────────────────────────────
 
@@ -81,69 +142,7 @@ export default function (pi: ExtensionAPI) {
           return { ok: false, error: e?.message ?? "Failed to switch model" };
         }
       },
-      onSessions: async () => {
-        try {
-          const sessions = await SessionManager.listAll();
-          return sessions.map((s) => ({
-            path: s.path,
-            id: s.id,
-            cwd: s.cwd || "",
-            name: s.name,
-            created: s.created.toISOString(),
-            modified: s.modified.toISOString(),
-            messageCount: s.messageCount,
-            firstMessage: s.firstMessage || "",
-          }));
-        } catch (e) {
-          console.error("Failed to list sessions:", e);
-          return [];
-        }
-      },
-      onSessionDetail: async (id: string) => {
-        try {
-          const sessions = await SessionManager.listAll();
-          const found = sessions.find((s) => s.id === id);
-          if (!found) return null;
-          const history = loadSessionHistory(found.path);
-          return {
-            history,
-            cwd: found.cwd || "",
-            model: currentModel,
-          };
-        } catch {
-          return null;
-        }
-      },
-      onSwitchSession: async (id: string) => {
-        try {
-          const sessions = await SessionManager.listAll();
-          const found = sessions.find((s) => s.id === id);
-          if (!found) return { ok: false, error: "Session not found" };
-          if (isStreaming || agentActive) {
-            return { ok: false, error: "Agent is busy, please wait" };
-          }
-          const switchFn = globalThis.__piWebSwitch;
-          if (!switchFn) return { ok: false, error: "Switch not available — run /web first" };
-          await switchFn(found.path);
-          return { ok: true };
-        } catch (e: any) {
-          return { ok: false, error: e?.message ?? "Switch failed" };
-        }
-      },
-      onNewSession: async (cwd: string) => {
-        try {
-          const newFn = globalThis.__piWebNew;
-          if (!newFn) return { ok: false, error: "Not available — run /web first" };
-          if (isStreaming || agentActive) {
-            return { ok: false, error: "Agent is busy, please wait" };
-          }
-          await newFn(cwd);
-          return { ok: true };
-        } catch (e: any) {
-          return { ok: false, error: e?.message ?? "New session failed" };
-        }
-      },
-      onCurrentHistory: () => loadSessionHistory(sessionFile || ""),
+
       cwd,
       history,
       getStatus: () => ({
@@ -154,24 +153,40 @@ export default function (pi: ExtensionAPI) {
         model: currentModel,
         cwd: currentCwd,
         sessionId,
+        history,
+        usage: getUsageStats(),
+        context: getContextStats(),
       }),
     };
   }
 
   function broadcast(event: string, data: Record<string, unknown>) {
-    globalThis.__piWebServer?.broadcast(event, data);
+    // Broadcast to all servers (all session browsers)
+    const servers = globalThis.__piWebServers;
+    if (servers) {
+      for (const server of servers.values()) {
+        server.broadcast(event, data);
+      }
+    }
   }
 
+
+
   async function ensureServer(cwd: string, history: Record<string, unknown>[], reason: string) {
-    const existing = globalThis.__piWebServer;
+    const servers = globalThis.__piWebServers ?? new Map<string, WebServer>();
+    globalThis.__piWebServers = servers;
+
+    // Use sessionId as the key — each session gets its own server
+    if (!sessionId) return undefined;
+
+    const existing = servers.get(sessionId);
 
     if (!existing) {
-      // First time: create and start
+      // First time for this session: create and start on a random port
       const server = new WebServer(buildServerOptions(cwd, history));
-      const port = parseInt(process.env.PI_WEB_PORT || "9876", 10);
-      const host = process.env.PI_WEB_HOST || "0.0.0.0";
-      await server.start(port, host);
-      globalThis.__piWebServer = server;
+      server.setSessionId(sessionId);
+      await server.start(0); // port 0 = OS picks random port
+      servers.set(sessionId, server);
       return server;
     }
 
@@ -187,76 +202,39 @@ export default function (pi: ExtensionAPI) {
     return existing;
   }
 
-  // ── Helpers for session switching chain ───────────────────
-  function setupSessionGlobals(ctx: any) {
-    const makeSwitch = (c: any) => async (path: string) => {
-      await c.switchSession(path, {
-        withSession: async (newC: any) => {
-          setupSessionGlobals(newC);
-        },
-      });
-    };
-    const makeNew = (c: any) => async (targetCwd: string) => {
-      const sm = SessionManager.create(targetCwd);
-      sm.newSession();
-      const newPath = sm.getSessionFile()!;
-      await c.switchSession(newPath, {
-        withSession: async (newC: any) => {
-          setupSessionGlobals(newC);
-        },
-      });
-    };
-    globalThis.__piWebSwitch = makeSwitch(ctx);
-    globalThis.__piWebNew = makeNew(ctx);
-  }
-
   // ── Command: /web-ui (and alias /web) ──────────────────────
   pi.registerCommand("web-ui", {
     aliases: ["web"],
-    description: "Start web UI for viewing and interacting with the conversation",
+    description: "Show web UI URL (server auto-starts on session launch)",
     handler: async (_args, ctx) => {
-      setupSessionGlobals(ctx);
-      _modelRegistry = ctx.modelRegistry;
-      currentCwd = ctx.cwd;
-
-      if (!currentModel && (ctx as any).model) {
-        const m = (ctx as any).model;
-        currentModel = { provider: m.provider ?? "unknown", name: m.id ?? m.name ?? "unknown", id: m.id ?? m.name ?? "unknown" };
-      }
-
-      sessionFile = ctx.sessionManager.getSessionFile();
-      const history = loadSessionHistory(sessionFile || "");
-
-      const server = await ensureServer(ctx.cwd, history, "startup");
-      const addresses = server.getAddresses();
-      const primaryUrl = addresses[0] || `http://127.0.0.1:${server.port}`;
+      const servers = globalThis.__piWebServers;
+      const server = servers?.get(sessionId || "");
       
-      // Show all addresses in notification
+      if (!server) {
+        ctx.ui.notify("Web server not ready yet", "error");
+        return;
+      }
+      
+      const addresses = server.getAddresses();
       if (addresses.length > 1) {
         ctx.ui.notify(`Web UI at:\n${addresses.join("\n")}`, "success");
       } else {
-        ctx.ui.notify(`Web UI at ${primaryUrl}`, "success");
+        ctx.ui.notify(`Web UI at ${addresses[0]}`, "success");
       }
-
-      // Open browser
-      const { exec } = await import("node:child_process");
-      const { platform } = await import("node:os");
-      const os = platform();
-      if (os === "darwin") exec(`open "${primaryUrl}"`);
-      else if (os === "linux") exec(`xdg-open "${primaryUrl}"`);
-      else if (os === "win32") exec(`start "" "${primaryUrl}"`);
     },
   });
 
   // ── Session events ─────────────────────────────────────────
   pi.on("session_start", async (event, ctx) => {
-    setupSessionGlobals(ctx);
     _modelRegistry = ctx.modelRegistry;
     currentCwd = ctx.cwd;
+    resetUsage();
 
     if (!currentModel && (ctx as any).model) {
       const m = (ctx as any).model;
       currentModel = { provider: m.provider ?? "unknown", name: m.id ?? m.name ?? "unknown", id: m.id ?? m.name ?? "unknown" };
+      _contextWindow = m.contextWindow ?? 0;
+      _maxTokens = m.maxTokens ?? 0;
     }
 
     try {
@@ -267,7 +245,26 @@ export default function (pi: ExtensionAPI) {
     } catch {}
 
     const history = loadSessionHistory(sessionFile || "");
-    await ensureServer(ctx.cwd, history, event.reason);
+    const server = await ensureServer(ctx.cwd, history, event.reason);
+    
+    // Auto-open browser and show URL on first session start
+    if (server && event.reason === "startup") {
+      const addresses = server.getAddresses();
+      const primaryUrl = addresses[0] || `http://127.0.0.1:${server.port}`;
+      
+      // Show URL widget above editor
+      const widgetLines = addresses.map(a => `  ${a}`);
+      ctx.ui.setWidget("web-ui", [`Web UI:`, ...widgetLines]);
+
+      // Open browser
+      const { exec } = await import("node:child_process");
+      const { platform } = await import("node:os");
+      const os = platform();
+      if (os === "darwin") exec(`open "${primaryUrl}"`);
+      else if (os === "linux") exec(`xdg-open "${primaryUrl}"`);
+      else if (os === "win32") exec(`start "" "${primaryUrl}"`);
+    }
+
     // Push new session data to all browser clients (handles session switch)
     broadcast("connected", {
       connected: true,
@@ -277,6 +274,8 @@ export default function (pi: ExtensionAPI) {
       model: currentModel,
       cwd: currentCwd,
       sessionId,
+      usage: getUsageStats(),
+      context: getContextStats(),
       history,
     });
   });
@@ -325,7 +324,10 @@ export default function (pi: ExtensionAPI) {
   pi.on("message_end", async (event) => {
     isStreaming = false;
     isThinking = false;
-    broadcast("message_end", { message: (event as any).message, timestamp: Date.now() });
+    const msg = (event as any).message;
+    accumulateUsage(msg);
+    broadcast("message_end", { message: msg, timestamp: Date.now() });
+    broadcast("usage_update", { usage: getUsageStats(), context: getContextStats(), timestamp: Date.now() });
   });
 
   // ── Tool execution events ──────────────────────────────────
@@ -348,11 +350,19 @@ export default function (pi: ExtensionAPI) {
   pi.on("model_select", async (event) => {
     const ev = event as any;
     currentModel = { provider: ev.model?.provider ?? "unknown", name: ev.model?.id ?? "unknown", id: ev.model?.id ?? ev.model?.name ?? "unknown" };
+    _contextWindow = ev.model?.contextWindow ?? 0;
+    _maxTokens = ev.model?.maxTokens ?? 0;
+    resetUsage();
     broadcast("model_select", { model: currentModel, previousModel: ev.previousModel, source: ev.source, timestamp: Date.now() });
   });
 
   // ── Cleanup on process exit ────────────────────────────────
   process.on("exit", () => {
-    globalThis.__piWebServer?.stop();
+    const servers = globalThis.__piWebServers;
+    if (servers) {
+      for (const server of servers.values()) {
+        server.stop();
+      }
+    }
   });
 }

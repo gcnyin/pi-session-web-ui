@@ -4,7 +4,7 @@
  * Z-Index Scale (see index.html CSS for layer documentation):
  *   Layer 0    — Content (default stacking)
  *   Layer 10   — Fixed elements (header, scroll-to-bottom btn)
- *   Layer 50   — Overlays (sidebar, sidebar-backdrop)
+ *   Layer 50   — Overlays
  *   Layer 100  — Modals (popups, dialogs)
  *   Layer 9999 — Global effects (noise grain texture)
  */
@@ -90,11 +90,14 @@ const state = {
   currentAssistantEl: null, currentThinkingEl: null,
   theme: 'system', _mdTimer: null,
   modelPopupOpen: false, modelPopupEl: null, availableModels: [],
-  sidebarOpen: false, sessions: [], sessionsLoading: false,
-  activeCwd: null, collapsedGroups: {},
+  activeCwd: null,
   // Timers for running tools & thinking
   _toolTimers: new Map(), _thinkStart: null,
   _lastMsgDate: null,
+  // Stats popup
+  statsPopupOpen: false,
+  usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: null, cacheHitRate: 0 },
+  context: { tokens: null, window: 0, maxTokens: 0 },
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -110,6 +113,10 @@ const D = {
   msgCtr: $('messagesContainer'), msgList: $('messagesList'), empty: $('emptyState'),
   scrollBtn: $('scrollBottomBtn'),
   input: $('messageInput'), send: $('btnSend'),
+  statsBtn: $('statsBtn'), statsPopup: $('statsPopup'),
+  statsInput: $('statsInput'), statsOutput: $('statsOutput'), statsReasoning: $('statsReasoning'),
+  statsCacheRead: $('statsCacheRead'), statsCacheWrite: $('statsCacheWrite'), statsCacheHitRate: $('statsCacheHitRate'),
+  statsContextTokens: $('statsContextTokens'), statsMaxTokens: $('statsMaxTokens'),
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -118,6 +125,19 @@ const D = {
 function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function trunc(s, n) { if (!s) return ''; return s.length <= n ? s : s.slice(0, n) + '\u2026'; }
 function mkEl(tag, cls) { const e = document.createElement(tag); if (cls) e.className = cls; return e; }
+
+/**
+ * Format number with k/M abbreviation.
+ * < 1000: raw number (e.g. 123)
+ * 1,000 - 999,999: k (e.g. 12.3k)
+ * ≥ 1,000,000: M (e.g. 1.2M)
+ */
+function formatTokens(n) {
+  if (n == null) return '--';
+  if (n < 1000) return n.toString();
+  if (n < 1000000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
+  return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // Theme
@@ -330,17 +350,45 @@ function updateSendBtn() {
   D.send.querySelector('.btn-send-icon').innerHTML = isActive ? ICONS.stop : ICONS.send;
 }
 
+function shortCwd(fullPath) {
+  if (!fullPath) return '';
+  // On narrow screens (≤768px) show only the last directory component
+  if (window.innerWidth <= 768) {
+    const lastSep = fullPath.lastIndexOf('/');
+    return lastSep >= 0 ? fullPath.slice(lastSep + 1) || '/' : fullPath;
+  }
+  return fullPath;
+}
+
+function formatCwd(fullPath) {
+  return shortCwd(fullPath);
+}
+
+// Re-render CWD on window resize (debounced)
+let _cwdResizeTimer = null;
+window.addEventListener('resize', () => {
+  if (_cwdResizeTimer) clearTimeout(_cwdResizeTimer);
+  _cwdResizeTimer = setTimeout(() => {
+    if (state.cwd) {
+      const span = D.cwd.querySelector('span');
+      if (span) span.textContent = formatCwd(state.cwd);
+    }
+  }, 150);
+});
+
 function refresh() {
   if (state.model) {
     D.modelProv.textContent = state.model.provider || '-';
     D.modelName.textContent = state.model.name || 'unknown';
+    D.modelBadge.title = state.model.provider + ' / ' + (state.model.name || 'unknown');
     D.modelBadge.classList.remove('hidden');
   } else {
     D.modelBadge.classList.add('hidden');
   }
   if (state.cwd) {
     const span = D.cwd.querySelector('span');
-    if (span) span.textContent = state.cwd;
+    if (span) span.textContent = formatCwd(state.cwd);
+    D.cwd.title = state.cwd;
     D.cwd.classList.remove('hidden');
   } else {
     D.cwd.classList.add('hidden');
@@ -348,6 +396,85 @@ function refresh() {
   updateSendBtn();
   if (state.modelPopupOpen) updatePopupCheck();
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// Stats Popup
+// ═══════════════════════════════════════════════════════════════════
+function updateStatsPopup() {
+  const { usage, context } = state;
+  D.statsInput.textContent = formatTokens(usage.input);
+  D.statsOutput.textContent = formatTokens(usage.output);
+  D.statsReasoning.textContent = usage.reasoning != null ? formatTokens(usage.reasoning) : '-';
+  D.statsCacheRead.textContent = formatTokens(usage.cacheRead);
+  D.statsCacheWrite.textContent = formatTokens(usage.cacheWrite);
+  D.statsCacheHitRate.textContent = usage.cacheHitRate.toFixed(1) + '%';
+  D.statsContextTokens.textContent = formatTokens(context.tokens) + ' / ' + formatTokens(context.window);
+  D.statsMaxTokens.textContent = formatTokens(context.maxTokens);
+}
+
+function positionStatsPopup() {
+  const btnRect = D.statsBtn.getBoundingClientRect();
+  const popup = D.statsPopup;
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const safeBottom = parseInt(getComputedStyle(document.documentElement).getPropertyValue('env(safe-area-inset-bottom)')) || 0;
+
+  popup.style.position = 'fixed';
+  // Temporarily show to measure actual size, then hide again
+  popup.classList.remove('hidden');
+  const popupWidth = Math.max(popup.offsetWidth || 240, 200);
+  const popupHeight = Math.max(popup.offsetHeight || 300, 200);
+  popup.classList.add('hidden');
+
+  let top = btnRect.bottom + 6;
+  let left = btnRect.right - popupWidth; // right-align to button
+
+  // Ensure popup doesn't go off edges
+  if (left < 16) left = 16;
+  if (left + popupWidth > viewportWidth - 16) left = viewportWidth - popupWidth - 16;
+  if (top + popupHeight > viewportHeight - 16 - safeBottom) top = btnRect.top - popupHeight - 6;
+
+  popup.style.top = top + 'px';
+  popup.style.left = left + 'px';
+}
+
+function toggleStatsPopup(e) {
+  e.stopPropagation();
+  if (state.statsPopupOpen) {
+    closeStatsPopup();
+  } else {
+    openStatsPopup();
+  }
+}
+
+function openStatsPopup() {
+  state.statsPopupOpen = true;
+  updateStatsPopup();
+  positionStatsPopup();
+  D.statsPopup.classList.remove('hidden');
+}
+
+function closeStatsPopup() {
+  state.statsPopupOpen = false;
+  D.statsPopup.classList.add('hidden');
+}
+
+D.statsBtn.addEventListener('click', toggleStatsPopup);
+
+// Close stats popup on click outside
+document.addEventListener('click', e => {
+  if (state.statsPopupOpen && !D.statsPopup.contains(e.target) && e.target !== D.statsBtn && !D.statsBtn.contains(e.target)) {
+    closeStatsPopup();
+  }
+});
+
+// Close stats popup on Escape
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && state.statsPopupOpen) {
+    closeStatsPopup();
+    e.stopPropagation();
+  }
+});
 
 // ═══════════════════════════════════════════════════════════════════
 // Model Popup (with search)
@@ -376,163 +503,145 @@ async function openModelPopup() {
   // Get viewport dimensions
   const viewportWidth = window.innerWidth;
   const viewportHeight = window.innerHeight;
+  const safeBottom = parseInt(getComputedStyle(document.documentElement).getPropertyValue('env(safe-area-inset-bottom)')) || 0;
   
-  // Adjust for mobile screens
-  const isMobile = viewportWidth <= 768;
-  const popupWidth = isMobile ? 300 : 360;
-  const popupMaxHeight = isMobile ? 300 : 360;
+  // Dynamic sizing: min(desired, viewport - margins)
+  const desiredWidth = Math.min(360, viewportWidth - 32);
+  const desiredMaxHeight = Math.min(360, viewportHeight - 32 - safeBottom);
   
   // Ensure popup doesn't go off right edge
-  if (left + popupWidth > viewportWidth - 16) {
-    left = viewportWidth - popupWidth - 16;
+  if (left + desiredWidth > viewportWidth - 16) {
+    left = viewportWidth - desiredWidth - 16;
   }
   
   // Ensure popup doesn't go off left edge
-  if (left < 16) {
-    left = 16;
-  }
+  if (left < 16) left = 16;
   
-  // Check if popup would go off bottom
-  if (top + popupMaxHeight > viewportHeight - 16) {
-    // Try positioning above the badge
-    const aboveTop = badgeRect.top - popupMaxHeight - 6;
-    if (aboveTop >= 16) {
-      top = aboveTop;
-    } else {
-      // If it doesn't fit above either, position at top of viewport with padding
-      top = 16;
-    }
+  // Ensure popup doesn't go off bottom
+  if (top + desiredMaxHeight > viewportHeight - 16 - safeBottom) {
+    top = badgeRect.top - desiredMaxHeight - 6;
   }
   
   popup.style.top = top + 'px';
   popup.style.left = left + 'px';
+  popup.style.maxHeight = desiredMaxHeight + 'px';
   
-  document.body.appendChild(popup);
   state.modelPopupEl = popup;
+  document.body.appendChild(popup);
 
+  // Fetch models
   try {
     const r = await fetch('/models');
-    if (!r.ok) throw new Error('Failed to fetch');
     const data = await r.json();
     state.availableModels = data.models || [];
-    renderModelList();
+    
+    popup.innerHTML = '';
+    
+    // Header
+    const header = mkEl('div', 'model-popup-header');
+    header.innerHTML = '<span>Switch Model</span><span style="font-size:11px;color:var(--text-faint)">' + (state.availableModels.length) + ' available</span>';
+    popup.appendChild(header);
+    
+    // Search input
+    const searchContainer = mkEl('div', 'model-popup-search');
+    searchContainer.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="text" class="model-popup-search-input" placeholder="Search models..." autofocus>';
+    popup.appendChild(searchContainer);
+    
+    const searchInput = searchContainer.querySelector('input');
+    
+    // Model list container
+    const listContainer = mkEl('div', 'model-popup-list');
+    listContainer.style.maxHeight = (desiredMaxHeight - 100) + 'px';
+    listContainer.style.overflowY = 'auto';
+    popup.appendChild(listContainer);
+    
+    function renderModels(filter = '') {
+      listContainer.innerHTML = '';
+      const filtered = state.availableModels.filter(m => {
+        if (!filter) return true;
+        const f = filter.toLowerCase();
+        return (m.provider && m.provider.toLowerCase().includes(f)) ||
+               (m.name && m.name.toLowerCase().includes(f)) ||
+               (m.id && m.id.toLowerCase().includes(f));
+      });
+      
+      if (filtered.length === 0) {
+        listContainer.innerHTML = '<div class="model-popup-loading">No models match</div>';
+        return;
+      }
+      
+      for (const m of filtered) {
+        const item = mkEl('div', 'model-popup-item');
+        const isActive = state.model && m.provider === state.model.provider && m.id === state.model.id;
+        if (isActive) item.classList.add('active');
+        
+        item.innerHTML = `
+          <span class="popup-provider">${esc(m.provider)}</span>
+          <span class="popup-name">${esc(m.name || m.id)}</span>
+          ${isActive ? '<span class="popup-check">' + ICONS.check + '</span>' : ''}
+        `;
+        
+        item.addEventListener('click', async () => {
+          try {
+            const r = await fetch('/model', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ provider: m.provider, id: m.id })
+            });
+            const result = await r.json();
+            if (result.ok) {
+              state.model = m;
+              refresh();
+              closeModelPopup();
+            } else {
+              item.style.background = 'var(--bg-danger)';
+              setTimeout(() => item.style.background = '', 1000);
+            }
+          } catch (e) {
+            console.error('model switch err:', e);
+          }
+        });
+        
+        listContainer.appendChild(item);
+      }
+    }
+    
+    renderModels();
+    searchInput.focus();
+    
+    searchInput.addEventListener('input', () => {
+      renderModels(searchInput.value);
+    });
+    
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        closeModelPopup();
+      }
+    });
+    
   } catch (e) {
     popup.innerHTML = '<div class="model-popup-error">Failed to load models</div>';
   }
 }
 
-function renderModelList(filter) {
-  if (!state.modelPopupEl) return;
-  const popup = state.modelPopupEl;
-  let models = state.availableModels;
-  const q = (filter || '').toLowerCase().trim();
-
-  if (q) {
-    models = models.filter(m =>
-      (m.provider || '').toLowerCase().includes(q) ||
-      (m.id || m.name || '').toLowerCase().includes(q)
-    );
-  }
-
-  // Group by provider
-  const providers = {};
-  for (const m of models) {
-    const p = m.provider || 'unknown';
-    if (!providers[p]) providers[p] = [];
-    providers[p].push(m);
-  }
-
-  let html = `<div class="model-popup-header">
-    <span>Switch Model</span>
-    <span style="font-weight:400;font-size:var(--text-2xs);opacity:0.6">${models.length} available</span>
-  </div>
-  <div class="model-popup-search">
-    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6.5" cy="6.5" r="4.5"/><line x1="10" y1="10" x2="14" y2="14"/></svg>
-    <input class="model-popup-search-input" type="text" placeholder="Filter models..." autocomplete="off" spellcheck="false">
-  </div>`;
-
-  const curId = state.model ? (state.model.provider + '/' + (state.model.id || state.model.name)) : '';
-
-  for (const [prov, ms] of Object.entries(providers)) {
-    for (const m of ms) {
-      const mid = m.provider + '/' + (m.id || m.name);
-      const active = mid === curId;
-      html += `
-        <div class="model-popup-item${active ? ' active' : ''}" data-model-id="${esc(m.id || m.name)}" data-model-provider="${esc(m.provider)}">
-          <span class="popup-provider">${esc(m.provider)}</span>
-          <span class="popup-name">${esc(m.id || m.name)}</span>
-          ${active ? '<span class="popup-check">' + ICONS.check + '</span>' : ''}
-        </div>`;
-    }
-  }
-
-  popup.innerHTML = html;
-
-  // Search input handler
-  const searchInput = popup.querySelector('.model-popup-search-input');
-  if (searchInput) {
-    searchInput.addEventListener('input', () => renderModelList(searchInput.value));
-    searchInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') { closeModelPopup(); return; }
-      e.stopPropagation();
-    });
-    setTimeout(() => searchInput.focus(), 50);
-  }
-
-  // Click handlers on items
-  popup.querySelectorAll('.model-popup-item').forEach(item => {
-    item.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const prov = item.dataset.modelProvider;
-      const id = item.dataset.modelId;
-      switchModel(prov, id);
-    });
-  });
-}
-
 function updatePopupCheck() {
   if (!state.modelPopupEl) return;
-  const curId = state.model ? (state.model.provider + '/' + (state.model.id || state.model.name)) : '';
   state.modelPopupEl.querySelectorAll('.model-popup-item').forEach(item => {
-    const mid = item.dataset.modelProvider + '/' + item.dataset.modelId;
-    const active = mid === curId;
-    item.classList.toggle('active', active);
-    let check = item.querySelector('.popup-check');
-    if (active && !check) {
-      check = document.createElement('span');
-      check.className = 'popup-check';
-      check.innerHTML = ICONS.check;
-      item.appendChild(check);
-    } else if (!active && check) {
-      check.remove();
+    const provider = item.querySelector('.popup-provider')?.textContent;
+    const name = item.querySelector('.popup-name')?.textContent;
+    const isActive = state.model && provider === state.model.provider && (name === state.model.name || name === state.model.id);
+    
+    const existingCheck = item.querySelector('.popup-check');
+    if (isActive && !existingCheck) {
+      const checkSpan = mkEl('span', 'popup-check');
+      checkSpan.innerHTML = ICONS.check;
+      item.appendChild(checkSpan);
+      item.classList.add('active');
+    } else if (!isActive && existingCheck) {
+      existingCheck.remove();
+      item.classList.remove('active');
     }
   });
-}
-
-async function switchModel(provider, id) {
-  if (!state.modelPopupEl) return;
-  const items = state.modelPopupEl.querySelectorAll('.model-popup-item');
-  items.forEach(i => i.style.pointerEvents = 'none');
-  try {
-    const r = await fetch('/model', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider, id }),
-    });
-    const data = await r.json();
-    if (data.ok) {
-      closeModelPopup();
-    } else {
-      const err = data.error || 'Failed to switch model';
-      if (state.modelPopupEl) {
-        state.modelPopupEl.innerHTML = '<div class="model-popup-error">' + esc(err) + '</div>';
-      }
-    }
-  } catch (e) {
-    if (state.modelPopupEl) {
-      state.modelPopupEl.innerHTML = '<div class="model-popup-error">Network error</div>';
-    }
-  }
 }
 
 function closeModelPopup() {
@@ -543,113 +652,63 @@ function closeModelPopup() {
   }
 }
 
-document.addEventListener('click', (e) => {
-  if (state.modelPopupOpen && !D.modelBadge.contains(e.target)) {
-    closeModelPopup();
-  }
-});
-
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && state.modelPopupOpen) {
+// Close model popup on click outside
+document.addEventListener('click', e => {
+  if (state.modelPopupOpen && state.modelPopupEl && !state.modelPopupEl.contains(e.target) && !D.modelBadge.contains(e.target)) {
     closeModelPopup();
   }
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// Copy-to-clipboard button
-// ═══════════════════════════════════════════════════════════════════
-window.copyToolOutput = function (btn) {
-  const body = btn.closest('.tool-card-body');
-  const pre = body?.querySelector('pre');
-  if (!pre) return;
-  navigator.clipboard.writeText(pre.textContent || '').then(() => {
-    btn.classList.add('copied');
-    btn.innerHTML = ICONS.check + ' <span>Copied</span>';
-    setTimeout(() => { btn.classList.remove('copied'); btn.innerHTML = ICONS.copy + ' <span>Copy</span>'; }, 2000);
-  }).catch(() => {});
-};
-
-// ═══════════════════════════════════════════════════════════════════
-// Scroll
-// ═══════════════════════════════════════════════════════════════════
-function hideEmpty() { D.empty.classList.add('hidden'); }
-
-function scrollDown(force) {
-  const atBottom = D.msgCtr.scrollHeight - D.msgCtr.scrollTop - D.msgCtr.clientHeight < 80;
-  updateScrollBtn();
-  if (!force && !atBottom) return;
-  requestAnimationFrame(() => { D.msgCtr.scrollTop = D.msgCtr.scrollHeight; });
-}
-
-function updateScrollBtn() {
-  const dist = D.msgCtr.scrollHeight - D.msgCtr.scrollTop - D.msgCtr.clientHeight;
-  const show = dist > 120;
-  D.scrollBtn.classList.toggle('visible', show);
-  const badge = D.scrollBtn.querySelector('.badge');
-  if (badge) badge.classList.toggle('streaming', show && (state.streaming || state.thinking));
-}
-
-D.msgCtr.addEventListener('scroll', updateScrollBtn, { passive: true });
-D.scrollBtn.addEventListener('click', () => {
-  D.msgCtr.scrollTo({ top: D.msgCtr.scrollHeight, behavior: 'smooth' });
-});
-
-// ═══════════════════════════════════════════════════════════════════
-// User Message
+// Messages
 // ═══════════════════════════════════════════════════════════════════
 function addUserMsg(msg) {
-  const ts = msg.time?.created;
-  insertDateSep(ts);
   const el = mkEl('div', 'message user');
   el.dataset.msgId = msg.id || '';
+  const ts = msg.time?.created || msg.timestamp;
   const t = ts ? new Date(ts).toLocaleTimeString() : '';
+  const text = getHistoryText(msg);
   el.innerHTML = `
     <div class="message-header">
       <span class="message-meta">${t}</span>
     </div>
-    <div class="message-content">${esc(getMsgText(msg))}</div>`;
+    <div class="message-content">${esc(text)}</div>`;
   D.msgList.appendChild(el);
 }
 
-function getMsgText(msg) {
-  if (!msg) return '';
-  if (Array.isArray(msg.content)) {
-    const t = msg.content.filter(c => c.type === 'text').map(c => c.text);
-    if (t.length) return t.join('\n');
-  }
-  return msg.text || '';
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// Assistant Message
-// ═══════════════════════════════════════════════════════════════════
 function addAssistantMsg(msg) {
-  const prev = D.msgList.querySelector('.message.assistant.streaming');
-  if (prev && !prev.querySelector('.message-content')?.textContent?.trim()) prev.remove();
-
   const el = mkEl('div', 'message assistant streaming');
-  el.dataset.msgId = msg.id || '';
-  const t = msg.time?.created ? new Date(msg.time.created).toLocaleTimeString() : '';
+  el.dataset.msgId = msg?.id || '';
+  const ts = msg?.time?.created || msg?.timestamp;
+  const t = ts ? new Date(ts).toLocaleTimeString() : '';
   el.innerHTML = `
     <div class="message-header">
       <span class="message-role">pi</span>
       <span class="message-meta">${t}</span>
-    </div>`;
+    </div>
+    <div class="message-content"></div>`;
   D.msgList.appendChild(el);
   return el;
 }
 
+function hideEmpty() {
+  if (D.empty) D.empty.classList.add('hidden');
+}
+
+function scrollDown(instant) {
+  requestAnimationFrame(() => {
+    D.msgCtr.scrollTo({ top: D.msgCtr.scrollHeight, behavior: instant ? 'instant' : 'smooth' });
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Streaming
+// ═══════════════════════════════════════════════════════════════════
 function streamText(delta) {
-  if (!state.currentAssistantEl) state.currentAssistantEl = addAssistantMsg({ id: 's-' + Date.now() });
-  let ce = state.currentAssistantEl.querySelector('.message-content');
-  if (!ce) {
-    ce = document.createElement('div');
-    ce.className = 'message-content streaming-cursor';
-    ce.setAttribute('data-plain', '');
-    const tb = state.currentAssistantEl.querySelector('.thinking-block');
-    if (tb) tb.after(ce);
-    else state.currentAssistantEl.appendChild(ce);
-  }
+  if (!state.currentAssistantEl) state.currentAssistantEl = addAssistantMsg({ id: 't-' + Date.now() });
+  const bubble = state.currentAssistantEl.querySelector('.message-content');
+  let ce = bubble;
+  if (!ce) { ce = mkEl('div', 'message-content'); state.currentAssistantEl.appendChild(ce); }
   const plain = (ce.getAttribute('data-plain') || '') + delta;
   ce.setAttribute('data-plain', plain);
 
@@ -1016,49 +1075,39 @@ function getToolResultText(msg) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Session transition animation
+// Copy Tool Output
 // ═══════════════════════════════════════════════════════════════════
-function animateSessionSwitch(callback) {
-  const msgs = D.msgList;
-  msgs.style.transition = 'opacity 0.2s var(--ease-out)';
-  msgs.style.opacity = '0';
-  setTimeout(() => {
-    if (callback) callback();
-    // Force reflow
-    msgs.offsetHeight;
-    msgs.style.opacity = '1';
-    setTimeout(() => { msgs.style.transition = ''; msgs.style.opacity = ''; }, 250);
-  }, 200);
-}
+window.copyToolOutput = function(btn) {
+  const body = btn.closest('.tool-card-body');
+  const pre = body?.querySelector('pre');
+  if (pre) {
+    navigator.clipboard.writeText(pre.textContent).then(() => {
+      const span = btn.querySelector('span');
+      if (span) span.textContent = 'Copied!';
+      setTimeout(() => { if (span) span.textContent = 'Copy'; }, 1500);
+    });
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════════
+// Scroll to Bottom Button
+// ═══════════════════════════════════════════════════════════════════
+D.scrollBtn.addEventListener('click', () => scrollDown(true));
+
+D.msgCtr.addEventListener('scroll', () => {
+  const atBottom = D.msgCtr.scrollHeight - D.msgCtr.scrollTop - D.msgCtr.clientHeight < 100;
+  D.scrollBtn.classList.toggle('visible', !atBottom);
+  D.scrollBtn.querySelector('.badge').classList.toggle('streaming', state.streaming);
+});
 
 // ═══════════════════════════════════════════════════════════════════
 // SSE Connection
 // ═══════════════════════════════════════════════════════════════════
-function getUrlSessionId() {
-  const p = new URLSearchParams(location.search);
-  return p.get('id') || null;
-}
-
-function navigateToSession(sessionId) {
-  const url = new URL(location.href);
-  url.searchParams.set('id', sessionId);
-  history.pushState({}, '', url);
-  // Animated transition
-  animateSessionSwitch(() => {
-    D.msgList.innerHTML = '';
-    D.empty.classList.remove('hidden');
-  });
-  if (state.eventSource) { state.eventSource.close(); state.eventSource = null; }
-  connect();
-}
-
 function connect() {
   if (state.eventSource) state.eventSource.close();
   setBanner('reconnecting', 'connecting...');
 
-  const sid = getUrlSessionId();
-  const esUrl = sid ? '/events?id=' + encodeURIComponent(sid) : '/events';
-  const es = new EventSource(esUrl);
+  const es = new EventSource('/events');
   state.eventSource = es;
   let rt = null;
 
@@ -1069,18 +1118,12 @@ function connect() {
       const d = JSON.parse(e.data);
       if (d.model) state.model = d.model;
       if (d.cwd) { state.cwd = d.cwd; state.activeCwd = d.cwd; }
-      if (d.sessionId) {
-        state.sessionId = d.sessionId;
-        const urlId = getUrlSessionId();
-        if (urlId !== d.sessionId) {
-          const url = new URL(location.href);
-          url.searchParams.set('id', d.sessionId);
-          history.replaceState({}, '', url);
-        }
-      }
+      if (d.sessionId) state.sessionId = d.sessionId;
       if (d.streaming !== undefined) state.streaming = d.streaming;
       if (d.thinking !== undefined) state.thinking = d.thinking;
       if (d.agentActive !== undefined) state.agentActive = d.agentActive;
+      if (d.usage) state.usage = d.usage;
+      if (d.context) state.context = d.context;
       if (Array.isArray(d.history) && d.history.length > 0) {
         D.msgList.innerHTML = '';
         D.empty.classList.add('hidden');
@@ -1090,14 +1133,11 @@ function connect() {
         if (D.msgList.children.length === 0) D.empty.classList.remove('hidden');
       }
       refresh();
-      // Auto-refresh sidebar if open
-      if (state.sidebarOpen) loadSessions();
     } catch {}
   });
 
   es.addEventListener('session_start', e => {
     try { const d = JSON.parse(e.data); if (d.sessionId) state.sessionId = d.sessionId; } catch {}
-    if (state.sidebarOpen) loadSessions();
   });
 
   es.addEventListener('agent_start', () => {
@@ -1106,7 +1146,6 @@ function connect() {
 
   es.addEventListener('agent_end', () => {
     state.agentActive = false; state.streaming = false; state.thinking = false; refresh(); scrollDown(true);
-    if (state.sidebarOpen) loadSessions();
   });
 
   es.addEventListener('message_start', e => {
@@ -1160,6 +1199,15 @@ function connect() {
     try { const d = JSON.parse(e.data); if (d.model) { state.model = d.model; refresh(); } } catch {}
   });
 
+  es.addEventListener('usage_update', e => {
+    try {
+      const d = JSON.parse(e.data);
+      if (d.usage) state.usage = d.usage;
+      if (d.context) state.context = d.context;
+      if (state.statsPopupOpen) updateStatsPopup();
+    } catch {}
+  });
+
   es.addEventListener('interrupted', () => {
     state.streaming = false; state.thinking = false; state.agentActive = false;
     finalizeAssistant(); refresh();
@@ -1174,230 +1222,6 @@ function connect() {
     rt = setTimeout(connect, 2000);
   };
 }
-
-// ═══════════════════════════════════════════════════════════════════
-// Sidebar — Session History
-// ═══════════════════════════════════════════════════════════════════
-const S = {
-  sidebar: $('sidebar'),
-  toggle: $('sidebarToggle'),
-  close: $('sidebarClose'),
-  body: $('sidebarBody'),
-  backdrop: $('sidebarBackdrop'),
-};
-
-// Load persisted group collapse state
-try {
-  const saved = localStorage.getItem('pi-sidebar-groups');
-  if (saved) state.collapsedGroups = JSON.parse(saved);
-} catch {}
-
-function persistCollapsedGroups() {
-  try { localStorage.setItem('pi-sidebar-groups', JSON.stringify(state.collapsedGroups)); } catch {}
-}
-
-function closeSidebar() {
-  state.sidebarOpen = false;
-  S.sidebar.classList.remove('open');
-  S.toggle.classList.remove('active');
-}
-
-function toggleSidebar() {
-  state.sidebarOpen = !state.sidebarOpen;
-  S.sidebar.classList.toggle('open', state.sidebarOpen);
-  S.toggle.classList.toggle('active', state.sidebarOpen);
-  if (state.sidebarOpen && state.sessions.length === 0 && !state.sessionsLoading) {
-    loadSessions();
-  }
-}
-
-S.toggle.addEventListener('click', toggleSidebar);
-S.close.addEventListener('click', closeSidebar);
-S.backdrop.addEventListener('click', closeSidebar);
-
-document.addEventListener('keydown', e => {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
-    const tag = document.activeElement?.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-    e.preventDefault();
-    toggleSidebar();
-  }
-});
-
-async function loadSessions() {
-  state.sessionsLoading = true;
-  S.body.innerHTML = '<div class="sidebar-loading"><div class="spinner"></div><span>Loading...</span></div>';
-  try {
-    const r = await fetch('/sessions');
-    if (!r.ok) throw new Error('Failed');
-    const data = await r.json();
-    state.sessions = data.sessions || [];
-    renderSessionList();
-  } catch (e) {
-    S.body.innerHTML = '<div class="sidebar-error">Failed to load sessions</div>';
-    console.error('loadSessions:', e);
-  } finally {
-    state.sessionsLoading = false;
-  }
-}
-
-function shortCwd(cwd) {
-  if (!cwd) return '(unknown)';
-  const parts = cwd.replace(/\/+$/, '').split('/');
-  return parts[parts.length - 1] || cwd;
-}
-
-function renderSessionList() {
-  const sessions = state.sessions;
-  if (sessions.length === 0) {
-    S.body.innerHTML = '<div class="sidebar-empty">No sessions found</div>';
-    return;
-  }
-
-  // Group by cwd
-  const groups = new Map();
-  for (const s of sessions) {
-    const key = s.cwd || '';
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(s);
-  }
-
-  // Sort within each group by modified descending
-  for (const items of groups.values()) {
-    items.sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime());
-  }
-
-  // Sort groups: activeCwd first, then by most recent modified
-  const sorted = [...groups.entries()].sort((a, b) => {
-    if (a[0] === state.activeCwd) return -1;
-    if (b[0] === state.activeCwd) return 1;
-    return new Date(b[1][0].modified).getTime() - new Date(a[1][0].modified).getTime();
-  });
-
-  const curId = state.sessionId || '';
-
-  let html = '';
-  for (const [cwd, items] of sorted) {
-    const isActiveCwd = cwd === state.activeCwd;
-    const collapsed = state.collapsedGroups[cwd] ?? (cwd !== state.activeCwd);
-    html += '<div class="sidebar-group">';
-    html += '<div class="sidebar-group-header' + (isActiveCwd ? ' active' : '') + '" data-cwd="' + esc(cwd) + '">';
-    html += '<span class="sidebar-group-chevron' + (collapsed ? '' : ' open') + '">' + ICONS.chevronRight + '</span>';
-    html += '<span class="sidebar-group-name">' + esc(shortCwd(cwd)) + '</span>';
-    html += '<span class="sidebar-group-count">' + items.length + '</span>';
-    html += '</div>';
-    html += '<div class="sidebar-group-items' + (collapsed ? ' collapsed' : '') + '">';
-    for (const s of items) {
-      const title = s.name || s.firstMessage || '(no messages)';
-      const date = new Date(s.modified);
-      const dateStr = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-      const timeStr = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-      const shortTitle = title.length > 50 ? title.slice(0, 49) + '\u2026' : title;
-      html += '<div class="sidebar-item' + (s.id === curId ? ' active' : '') + '" data-session-id="' + esc(s.id) + '" data-session-path="' + esc(s.path) + '" title="' + esc(cwd) + ' - ' + esc(title) + '">';
-      html += '<div class="sidebar-item-title">' + esc(shortTitle) + '</div>';
-      html += '<div class="sidebar-item-meta"><span>' + dateStr + ' ' + timeStr + '</span><span>' + (s.messageCount || 0) + ' msgs</span></div>';
-      html += '</div>';
-    }
-    html += '</div></div>';
-  }
-
-  S.body.innerHTML = html;
-
-  // Bind group header clicks
-  S.body.querySelectorAll('.sidebar-group-header').forEach(header => {
-    header.addEventListener('click', () => {
-      const cwd = header.dataset.cwd;
-      const items = header.nextElementSibling;
-      const chevron = header.querySelector('.sidebar-group-chevron');
-      const collapsed = items.classList.toggle('collapsed');
-      chevron.classList.toggle('open', !collapsed);
-      state.collapsedGroups[cwd] = collapsed;
-      persistCollapsedGroups();
-    });
-  });
-
-  // Bind session item clicks
-  S.body.querySelectorAll('.sidebar-item').forEach(item => {
-    item.addEventListener('click', async () => {
-      const sid = item.dataset.sessionId;
-      if (!sid) return;
-      S.body.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active'));
-      item.classList.add('active');
-      if (sid === state.sessionId) return;
-      try {
-        const r = await fetch('/session/switch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: sid }),
-        });
-        if (r.ok) {
-          // SSE will auto-reconnect
-        }
-      } catch (e) {
-        console.error('Switch session failed:', e);
-      }
-    });
-  });
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// New Session Dialog
-// ═══════════════════════════════════════════════════════════════════
-const N = {
-  btn: $('btnNewSession'),
-  dialog: $('newSessionDialog'),
-  input: $('newSessionCwdInput'),
-  cancel: $('btnDialogCancel'),
-  create: $('btnDialogCreate'),
-};
-
-function openNewSessionDialog() {
-  N.input.value = state.activeCwd || state.cwd || '';
-  N.dialog.classList.add('open');
-  setTimeout(() => N.input.focus(), 100);
-}
-
-function closeNewSessionDialog() {
-  N.dialog.classList.remove('open');
-}
-
-N.btn.addEventListener('click', openNewSessionDialog);
-N.cancel.addEventListener('click', closeNewSessionDialog);
-N.dialog.addEventListener('click', (e) => {
-  if (e.target === N.dialog) closeNewSessionDialog();
-});
-
-N.input.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') submitNewSession();
-  if (e.key === 'Escape') closeNewSessionDialog();
-});
-
-async function submitNewSession() {
-  const cwd = N.input.value.trim();
-  if (!cwd) return;
-  N.create.disabled = true;
-  N.create.textContent = 'Creating...';
-  try {
-    const r = await fetch('/session/new', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cwd }),
-    });
-    const data = await r.json();
-    if (data.ok) {
-      closeNewSessionDialog();
-    } else {
-      alert(data.error || 'Failed to create session');
-    }
-  } catch (e) {
-    alert('Network error');
-  } finally {
-    N.create.disabled = false;
-    N.create.textContent = 'Create';
-  }
-}
-
-N.create.addEventListener('click', submitNewSession);
 
 // ═══════════════════════════════════════════════════════════════════
 // Init
