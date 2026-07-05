@@ -5,7 +5,7 @@ import { WebServer } from "./server";
 
 // ── Global state ────────────────────────────────────────────
 // Stored on globalThis so it survives extension reloads and
-// session switches. Each session has its own server with a random port.
+// session switches. Each session has its own server on a fixed port.
 declare global {
   // Map<sessionId, WebServer> — each session gets its own server instance
   var __piWebServers: Map<string, WebServer> | undefined;
@@ -183,10 +183,30 @@ export default function (pi: ExtensionAPI) {
     const existing = servers.get(sessionId);
 
     if (!existing) {
-      // First time for this session: create and start on a random port
+      // First time for this session: create and start on fixed port
       const server = new WebServer(buildServerOptions(cwd, history));
       server.setSessionId(sessionId);
-      await server.start(0); // port 0 = OS picks random port
+      const BASE_PORT = 18765;
+      const MAX_ATTEMPTS = 100;
+      let port = BASE_PORT;
+      let started = false;
+      for (let i = 0; i < MAX_ATTEMPTS; i++) {
+        try {
+          await server.start(port);
+          started = true;
+          break;
+        } catch (err: any) {
+          if (err.code === 'EADDRINUSE') {
+            console.warn(`Port ${port} is already in use, trying ${port + 1}.`);
+            port++;
+          } else {
+            throw err;
+          }
+        }
+      }
+      if (!started) {
+        throw new Error(`Could not find an available port after ${MAX_ATTEMPTS} attempts starting from ${BASE_PORT}.`);
+      }
       servers.set(sessionId, server);
       return server;
     }
