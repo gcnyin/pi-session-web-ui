@@ -227,9 +227,13 @@ export class WebServer {
     const statusData = this.options.getStatus();
     this.sendEvent(client, "connected", JSON.stringify(statusData));
 
-    // Clear stale queued events — the "connected" event above
-    // already carries the complete session history, so replaying
-    // old message_start/message_end/etc. would double-render.
+    // Replay queued events to the new client so they don't miss
+    // any messages that arrived while no clients were connected.
+    // The history in "connected" already has completed messages,
+    // but streaming/in-progress events need to be replayed.
+    for (const queued of this.eventQueue) {
+      this.sendEvent(client, queued.event, queued.data);
+    }
     this.eventQueue.length = 0;
 
     // Heartbeat every 30s

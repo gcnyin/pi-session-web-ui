@@ -36,6 +36,7 @@ export default function (pi: ExtensionAPI) {
   let _modelRegistry: any = undefined;
   let _contextWindow = 0;
   let _maxTokens = 0;
+  let currentHistory: Record<string, unknown>[] = [];
 
   // ── Usage accumulation state ─────────────────────────────
   const usage = {
@@ -153,7 +154,7 @@ export default function (pi: ExtensionAPI) {
         model: currentModel,
         cwd: currentCwd,
         sessionId,
-        history,
+        history: currentHistory,
         usage: getUsageStats(),
         context: getContextStats(),
       }),
@@ -252,6 +253,7 @@ export default function (pi: ExtensionAPI) {
     } catch {}
 
     const history = loadSessionHistory(sessionFile || "");
+    currentHistory = history;
     const server = await ensureServer(ctx.cwd, history, event.reason);
     
     // Update widget with URL (always, since port may change on reload)
@@ -333,6 +335,12 @@ export default function (pi: ExtensionAPI) {
     isThinking = false;
     const msg = (event as any).message;
     accumulateUsage(msg);
+    
+    // Update currentHistory with the new message
+    if (msg) {
+      currentHistory.push(msg);
+    }
+    
     broadcast("message_end", { message: msg, timestamp: Date.now() });
     broadcast("usage_update", { usage: getUsageStats(), context: getContextStats(), timestamp: Date.now() });
   });
