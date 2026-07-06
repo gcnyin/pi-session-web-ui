@@ -183,30 +183,10 @@ export default function (pi: ExtensionAPI) {
     const existing = servers.get(sessionId);
 
     if (!existing) {
-      // First time for this session: create and start on fixed port
+      // First time for this session: create and start on random port
       const server = new WebServer(buildServerOptions(cwd, history));
       server.setSessionId(sessionId);
-      const BASE_PORT = 18765;
-      const MAX_ATTEMPTS = 100;
-      let port = BASE_PORT;
-      let started = false;
-      for (let i = 0; i < MAX_ATTEMPTS; i++) {
-        try {
-          await server.start(port);
-          started = true;
-          break;
-        } catch (err: any) {
-          if (err.code === 'EADDRINUSE') {
-            console.warn(`Port ${port} is already in use, trying ${port + 1}.`);
-            port++;
-          } else {
-            throw err;
-          }
-        }
-      }
-      if (!started) {
-        throw new Error(`Could not find an available port after ${MAX_ATTEMPTS} attempts starting from ${BASE_PORT}.`);
-      }
+      await server.start();          // port=0 → OS picks a random available port
       servers.set(sessionId, server);
       return server;
     }
