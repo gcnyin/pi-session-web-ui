@@ -368,19 +368,33 @@ export class WebServer {
 
 
   async start(port?: number, host?: string): Promise<number> {
-    // port=0 means OS picks a random available port
-    const p = port ?? 0;
     const h = host ?? process.env.PI_WEB_HOST ?? "0.0.0.0";
-    return new Promise((resolve, reject) => {
-      this.server.listen(p, h, () => {
+    let p = port ?? 23456;
+    const maxRetries = 100; // try up to 100 ports upward
+
+    for (let attempt = 0; attempt < maxRetries; attempt++, p++) {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          this.server.once("error", reject);
+          this.server.listen(p, h, () => {
+            this.server.removeListener("error", reject);
+            resolve();
+          });
+        });
         const addr = this.server.address();
         if (addr && typeof addr === "object") {
           this._port = addr.port;
         }
-        resolve(this._port);
-      });
-      this.server.on("error", reject);
-    });
+        return this._port;
+      } catch (err: any) {
+        if (err.code !== "EADDRINUSE") throw err;
+        // Port in use, try the next one
+      }
+    }
+
+    throw new Error(
+      `Could not find an available port after ${maxRetries} attempts (started at ${port ?? 23456})`
+    );
   }
 
   /**
