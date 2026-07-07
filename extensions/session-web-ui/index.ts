@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager, buildSessionContext } from "@earendil-works/pi-coding-agent";
 import { existsSync } from "node:fs";
 import { WebServer } from "./server";
@@ -33,6 +33,7 @@ export default function (pi: ExtensionAPI) {
   let agentActive = false;
   let sessionId: string | undefined;
   let sessionFile: string | undefined;
+  let currentCtx: ExtensionContext | undefined;
   let _modelRegistry: any = undefined;
   let _contextWindow = 0;
   let _maxTokens = 0;
@@ -112,12 +113,13 @@ export default function (pi: ExtensionAPI) {
         }
       },
       onInterrupt: () => {
-        // ctx.abort is not available outside the command handler,
-        // but pi.abort() works from the extension API
-        (pi as any).abort?.();
+        // Abort the current LLM/agent turn using the ExtensionContext
+        // captured from the latest session_start event.
+        currentCtx?.abort?.();
         isStreaming = false;
         isThinking = false;
         agentActive = false;
+        broadcast("interrupted", { timestamp: Date.now() });
       },
       onModels: async () => {
         try {
@@ -234,6 +236,7 @@ export default function (pi: ExtensionAPI) {
 
   // ── Session events ─────────────────────────────────────────
   pi.on("session_start", async (event, ctx) => {
+    currentCtx = ctx;
     _modelRegistry = ctx.modelRegistry;
     currentCwd = ctx.cwd;
     resetUsage();
@@ -290,6 +293,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async (_event) => {
+    currentCtx = undefined;
     broadcast("session_shutdown", { timestamp: Date.now() });
     // Server stays alive — it's a singleton
   });
