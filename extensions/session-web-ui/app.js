@@ -127,6 +127,17 @@ function trunc(s, n) { if (!s) return ''; return s.length <= n ? s : s.slice(0, 
 function mkEl(tag, cls) { const e = document.createElement(tag); if (cls) e.className = cls; return e; }
 
 /**
+ * Parse a skill block from message text.
+ * Mirrors parseSkillBlock() in pi agent-session.ts.
+ * Returns null if the text doesn't contain a skill block.
+ */
+function parseSkillBlock(text) {
+  const match = text.match(/^<skill name="([^"]+)" location="([^"]+)">\n([\s\S]*?)\n<\/skill>(?:\n\n([\s\S]+))?$/);
+  if (!match) return null;
+  return { name: match[1], location: match[2], content: match[3], userMessage: (match[4] || '').trim() || undefined };
+}
+
+/**
  * Format number with k/M abbreviation.
  * < 1000: raw number (e.g. 123)
  * 1,000 - 999,999: k (e.g. 12.3k)
@@ -192,6 +203,26 @@ function toolSub(name, args) {
     case 'websearch': return args.query || '';
     default: return args.subject || args.description || '';
   }
+}
+
+function renderSkillCard(skillBlock, timestamp) {
+  const t = timestamp ? new Date(timestamp).toLocaleTimeString() : '';
+  const card = mkEl('div', 'skill-card');
+  const safeName = esc(skillBlock.name);
+  const safeLoc = esc(skillBlock.location);
+  card.innerHTML = `
+    <div class="skill-card-header" onclick="this.parentElement.classList.toggle('expanded')">
+      <span class="skill-card-icon">📋</span>
+      <span class="skill-card-label">skill</span>
+      <span class="skill-card-name">${safeName}</span>
+      <span class="skill-card-meta">${t}</span>
+      <span class="skill-card-chevron">${ICONS.chevronDown}</span>
+    </div>
+    <div class="skill-card-body">
+      <div class="skill-card-location">${safeLoc}</div>
+      <div class="skill-card-content">${md(skillBlock.content)}</div>
+    </div>`;
+  return card;
 }
 
 function buildCmdLine(name, args) {
@@ -666,8 +697,28 @@ function addUserMsg(msg) {
   const el = mkEl('div', 'message user');
   el.dataset.msgId = msg.id || '';
   const ts = msg.time?.created || msg.timestamp;
-  const t = ts ? new Date(ts).toLocaleTimeString() : '';
   const text = getHistoryText(msg);
+
+  // Check for skill block in user message
+  const skillBlock = parseSkillBlock(text);
+  if (skillBlock) {
+    // Render skill card
+    const skillCard = renderSkillCard(skillBlock, ts);
+    D.msgList.appendChild(skillCard);
+    // If there's a user message after the skill block, render it separately
+    if (skillBlock.userMessage) {
+      const userEl = mkEl('div', 'message user');
+      userEl.innerHTML = `
+        <div class="message-header">
+          <span class="message-meta">${ts ? new Date(ts).toLocaleTimeString() : ''}</span>
+        </div>
+        <div class="message-content">${esc(skillBlock.userMessage)}</div>`;
+      D.msgList.appendChild(userEl);
+    }
+    return;
+  }
+
+  const t = ts ? new Date(ts).toLocaleTimeString() : '';
   el.innerHTML = `
     <div class="message-header">
       <span class="message-meta">${t}</span>
@@ -904,16 +955,35 @@ function renderHistory(history) {
 
     if (role === 'user') {
       insertDateSep(ts);
-      const el = mkEl('div', 'message user');
-      el.dataset.msgId = msg.id || '';
-      const t = ts ? new Date(ts).toLocaleTimeString() : '';
       const text = getHistoryText(msg);
-      el.innerHTML = `
-        <div class="message-header">
-          <span class="message-meta">${t}</span>
-        </div>
-        <div class="message-content">${esc(text)}</div>`;
-      D.msgList.appendChild(el);
+
+      // Check for skill block in user message
+      const skillBlock = parseSkillBlock(text);
+      if (skillBlock) {
+        const skillCard = renderSkillCard(skillBlock, ts);
+        D.msgList.appendChild(skillCard);
+        // If there's a user message after the skill block, render it separately
+        if (skillBlock.userMessage) {
+          const userEl = mkEl('div', 'message user');
+          const t = ts ? new Date(ts).toLocaleTimeString() : '';
+          userEl.innerHTML = `
+            <div class="message-header">
+              <span class="message-meta">${t}</span>
+            </div>
+            <div class="message-content">${esc(skillBlock.userMessage)}</div>`;
+          D.msgList.appendChild(userEl);
+        }
+      } else {
+        const el = mkEl('div', 'message user');
+        el.dataset.msgId = msg.id || '';
+        const t = ts ? new Date(ts).toLocaleTimeString() : '';
+        el.innerHTML = `
+          <div class="message-header">
+            <span class="message-meta">${t}</span>
+          </div>
+          <div class="message-content">${esc(text)}</div>`;
+        D.msgList.appendChild(el);
+      }
     }
 
     else if (role === 'assistant') {
