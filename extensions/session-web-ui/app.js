@@ -88,7 +88,7 @@ const state = {
   model: null, cwd: '', sessionId: null, reconnecting: false, eventSource: null,
   toolOutputs: new Map(),
   currentAssistantEl: null, currentThinkingEl: null,
-  theme: 'system', _mdTimer: null,
+  theme: 'system', thinkingExpanded: true, _mdTimer: null,
   modelPopupOpen: false, modelPopupEl: null, availableModels: [],
   activeCwd: null,
   // Timers for running tools & thinking
@@ -110,6 +110,7 @@ const D = {
   cwd: $('headerCwd'),
   thinkInd: $('thinkingIndicator'), thinkTime: $('thinkTime'),
   themeBtn: $('themeToggle'), themeIcon: $('themeIcon'),
+  thinkBtn: $('thinkToggle'),
   msgCtr: $('messagesContainer'), msgList: $('messagesList'), empty: $('emptyState'),
   scrollBtn: $('scrollBottomBtn'),
   input: $('messageInput'), send: $('btnSend'),
@@ -171,6 +172,37 @@ D.themeBtn.addEventListener('click', () => {
   const n = THEME_CYCLE[(i + 1) % 3];
   applyTheme(n); setTheme(n);
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// Thinking Default — header toggle controls whether thinking blocks
+// render expanded (open) or collapsed by default. Per-block clicks
+// remain local to that block; the toggle resets all blocks.
+// ═══════════════════════════════════════════════════════════════════
+function getThinkingPref() {
+  try {
+    const v = localStorage.getItem('pi-web-thinking-expanded');
+    if (v === null) return true;
+    return v === '1';
+  } catch { return true; }
+}
+function setThinkingPref(v) { try { localStorage.setItem('pi-web-thinking-expanded', v ? '1' : '0'); } catch {} }
+
+function applyThinkingPref(expanded) {
+  state.thinkingExpanded = expanded;
+  if (D.thinkBtn) D.thinkBtn.setAttribute('aria-pressed', expanded ? 'true' : 'false');
+  document.querySelectorAll('.thinking-block').forEach(tb => {
+    tb.classList.toggle('open', expanded);
+  });
+}
+
+applyThinkingPref(getThinkingPref());
+if (D.thinkBtn) {
+  D.thinkBtn.addEventListener('click', () => {
+    const next = !state.thinkingExpanded;
+    applyThinkingPref(next);
+    setThinkingPref(next);
+  });
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // Tool Metadata
@@ -787,6 +819,7 @@ function streamThinking(delta) {
     tb.querySelector('.thinking-label').addEventListener('click', () => {
       tb.classList.toggle('open');
     });
+    if (state.thinkingExpanded) tb.classList.add('open');
     const bubble = state.currentAssistantEl.querySelector('.message-content');
     if (bubble) bubble.parentNode.insertBefore(tb, bubble);
     else state.currentAssistantEl.appendChild(tb);
@@ -1013,6 +1046,7 @@ function renderHistory(history) {
           tb.querySelector('.thinking-label').addEventListener('click', () => {
             tb.classList.toggle('open');
           });
+          if (state.thinkingExpanded) tb.classList.add('open');
           el.appendChild(tb);
         } else if (block.type === 'toolCall') {
           const meta = toolMeta(block.name || 'unknown');
