@@ -265,16 +265,7 @@ export default function (pi: ExtensionAPI) {
       const widgetLines = addresses.map(a => `  ${a}`);
       ctx.ui.setWidget("web-ui", [`Web UI:`, ...widgetLines]);
 
-      // Auto-open browser on first session start only
-      if (event.reason === "startup") {
-        const primaryUrl = addresses[0] || `http://127.0.0.1:${server.port}`;
-        const { exec } = await import("node:child_process");
-        const { platform } = await import("node:os");
-        const os = platform();
-        if (os === "darwin") exec(`open "${primaryUrl}"`);
-        else if (os === "linux") exec(`xdg-open "${primaryUrl}"`);
-        else if (os === "win32") exec(`start "" "${primaryUrl}"`);
-      }
+      // Browser not auto-opened — user can run /web to get the URL
     }
 
     // Push new session data to all browser clients (handles session switch)
